@@ -10,24 +10,25 @@ const PRIORITY_STYLES = {
 const TYPE_ICON = { feature:'✨', bug:'🐛', task:'📋', chore:'🧹' };
 
 const BUCKET_COLORS = [
-  { name:'Slate',  value:'#64748b' },
-  { name:'Yellow', value:'#eab308' },
+  { name:'Muted',  value:'#948A7A' },
+  { name:'Ember',  value:'#E8743C' },
+  { name:'Deep',   value:'#C75A29' },
+  { name:'Dim',    value:'#6B6359' },
+  { name:'Red',    value:'#ef4444' },
   { name:'Blue',   value:'#3b82f6' },
   { name:'Green',  value:'#10b981' },
-  { name:'Red',    value:'#ef4444' },
   { name:'Purple', value:'#a855f7' },
-  { name:'Pink',   value:'#ec4899' },
-  { name:'Orange', value:'#f97316' },
 ];
 
 export default function Board({ project, profile, onOpenItem }) {
   const [buckets, setBuckets] = useState([]);
   const [items, setItems]     = useState([]);
   const [members, setMembers] = useState([]);
-  const [filter, setFilter]   = useState({ priority:'all', type:'all', assignee:'all', search:'' });
-  const [adding, setAdding]   = useState(null);        // bucket id — inline add item
+  const [features, setFeatures] = useState([]);
+  const [filter, setFilter]   = useState({ priority:'all', type:'all', assignee:'all', feature:'all', search:'' });
   const [dragItem, setDragItem] = useState(null);
-  const [bucketEditor, setBucketEditor] = useState(null); // { mode: 'new'|'edit', bucket? }
+  const [bucketEditor, setBucketEditor] = useState(null);
+  const [creating, setCreating] = useState(null);
 
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
@@ -42,14 +43,16 @@ export default function Board({ project, profile, onOpenItem }) {
   }, [project.id]);
 
   const load = async () => {
-    const [b, i, m] = await Promise.all([
+    const [b, i, m, f] = await Promise.all([
       supabase.from('buckets').select('*').eq('project_id', project.id).order('position'),
       supabase.from('items').select('*').eq('project_id', project.id).order('position'),
       supabase.from('profiles').select('id, email, display_name'),
+      supabase.from('features').select('*').eq('project_id', project.id).order('name'),
     ]);
     setBuckets(b.data || []);
     setItems(i.data || []);
     setMembers(m.data || []);
+    setFeatures(f.data || []);
   };
 
   const filtered = useMemo(() => items.filter(i => {
@@ -57,6 +60,7 @@ export default function Board({ project, profile, onOpenItem }) {
     if (filter.type     !== 'all' && i.type     !== filter.type)     return false;
     if (filter.assignee === 'me'  && i.assignee_id !== profile.id)   return false;
     if (filter.assignee === 'unassigned' && i.assignee_id)           return false;
+    if (filter.feature  !== 'all' && i.feature_id !== filter.feature) return false;
     if (filter.search && !i.title.toLowerCase().includes(filter.search.toLowerCase())) return false;
     return true;
   }), [items, filter, profile.id]);
@@ -68,11 +72,42 @@ export default function Board({ project, profile, onOpenItem }) {
     return map;
   }, [buckets, filtered]);
 
-  const addItem = async (bucketId, title) => {
-    if (!title.trim()) return;
-    const pos = (itemsByBucket[bucketId]?.length || 0);
+  const openCreateModal = (bucketId) => {
+    setCreating({
+      bucket_id: bucketId,
+      title: '',
+      description: '',
+      type: project.default_item_type || 'task',
+      priority: 'P2',
+      assignee_id: '',
+      labels: '',
+      feature_id: '',
+      github_ref: '',
+      version_seen: '',
+      version_fixed: '',
+      images: [],
+    });
+  };
+
+  const submitCreate = async (draft) => {
+    if (!draft.title.trim()) return;
+    const pos = (itemsByBucket[draft.bucket_id]?.length || 0);
     const { data: item } = await supabase.from('items').insert({
-      project_id: project.id, bucket_id: bucketId, title: title.trim(), position: pos, created_by: profile.id,
+      project_id: project.id,
+      bucket_id: draft.bucket_id,
+      title: draft.title.trim(),
+      description: draft.description || null,
+      type: draft.type,
+      priority: draft.priority,
+      assignee_id: draft.assignee_id || null,
+      labels: draft.labels ? draft.labels.split(',').map(s => s.trim()).filter(Boolean) : [],
+      feature_id: draft.feature_id || null,
+      github_ref: draft.github_ref || null,
+      version_seen: draft.version_seen || null,
+      version_fixed: draft.version_fixed || null,
+      images: draft.images || [],
+      position: pos,
+      created_by: profile.id,
     }).select().single();
     if (item) {
       await supabase.from('activity').insert({
@@ -80,7 +115,7 @@ export default function Board({ project, profile, onOpenItem }) {
         detail: { title: item.title },
       });
     }
-    setAdding(null);
+    setCreating(null);
     load();
   };
 
@@ -109,17 +144,15 @@ export default function Board({ project, profile, onOpenItem }) {
     const itemCount = itemsByBucket[bucket.id]?.length || 0;
     let msg = `Delete bucket "${bucket.name}"?`;
     if (itemCount > 0) {
-      msg += `\n\n⚠️ This bucket contains ${itemCount} item${itemCount === 1 ? '' : 's'}. Those items will be moved to the first bucket instead of deleted.`;
+      msg += `\n\nThis bucket contains ${itemCount} item${itemCount === 1 ? '' : 's'}. Those items will be moved to the first bucket instead of deleted.`;
     }
     if (!confirm(msg)) return;
 
     if (itemCount > 0) {
-      // Move items to the first bucket (excluding this one)
       const fallback = buckets.find(b => b.id !== bucket.id);
       if (fallback) {
         await supabase.from('items').update({ bucket_id: fallback.id }).eq('bucket_id', bucket.id);
       } else {
-        // No fallback bucket — shouldn't happen since you can't delete the last one (see guard)
         alert('Cannot delete the only bucket. Create another bucket first.');
         return;
       }
@@ -133,7 +166,6 @@ export default function Board({ project, profile, onOpenItem }) {
     const newIdx = idx + delta;
     if (newIdx < 0 || newIdx >= buckets.length) return;
     const other = buckets[newIdx];
-    // Swap positions
     await Promise.all([
       supabase.from('buckets').update({ position: other.position }).eq('id', bucket.id),
       supabase.from('buckets').update({ position: bucket.position }).eq('id', other.id),
@@ -167,24 +199,28 @@ export default function Board({ project, profile, onOpenItem }) {
       <div className="px-6 py-4 border-b border-bdr flex items-center gap-3">
         <div className="text-2xl">{project.icon}</div>
         <div className="flex-1 min-w-0">
-          <div className="text-lg font-bold text-text truncate">{project.name}</div>
-          <div className="text-xs text-dim">{items.length} items · {buckets.length} buckets</div>
+          <div className="text-lg font-bold text-paper truncate">{project.name}</div>
+          <div className="text-[10px] text-dim font-mono uppercase tracking-[0.18em]">{items.length} items · {buckets.length} buckets</div>
         </div>
       </div>
 
       <div className="px-6 py-3 border-b border-bdr flex items-center gap-2 flex-wrap">
         <input value={filter.search} onChange={e => setFilter({ ...filter, search: e.target.value })}
           placeholder="Search items…"
-          className="px-3 py-1.5 bg-card border border-bdr rounded text-sm text-text placeholder-dim focus:outline-none focus:border-accent w-48"/>
+          className="px-3 py-1.5 bg-card border border-bdr rounded text-sm text-paper placeholder-dim focus:outline-none focus:border-ember w-48"/>
         <Select value={filter.priority} onChange={v => setFilter({ ...filter, priority: v })}
           options={[['all','All priorities'],['P0','P0'],['P1','P1'],['P2','P2'],['P3','P3']]}/>
         <Select value={filter.type} onChange={v => setFilter({ ...filter, type: v })}
           options={[['all','All types'],['feature','Features'],['bug','Bugs'],['task','Tasks'],['chore','Chores']]}/>
         <Select value={filter.assignee} onChange={v => setFilter({ ...filter, assignee: v })}
           options={[['all','Everyone'],['me','Mine only'],['unassigned','Unassigned']]}/>
-        {(filter.priority!=='all' || filter.type!=='all' || filter.assignee!=='all' || filter.search) && (
-          <button onClick={() => setFilter({ priority:'all', type:'all', assignee:'all', search:'' })}
-            className="px-2 py-1.5 text-xs text-muted hover:text-text">clear</button>
+        {features.length > 0 && (
+          <Select value={filter.feature} onChange={v => setFilter({ ...filter, feature: v })}
+            options={[['all','All features'], ...features.map(f => [f.id, f.name])]}/>
+        )}
+        {(filter.priority!=='all' || filter.type!=='all' || filter.assignee!=='all' || filter.feature!=='all' || filter.search) && (
+          <button onClick={() => setFilter({ priority:'all', type:'all', assignee:'all', feature:'all', search:'' })}
+            className="px-2 py-1.5 text-xs text-muted hover:text-paper">clear</button>
         )}
       </div>
 
@@ -196,11 +232,9 @@ export default function Board({ project, profile, onOpenItem }) {
               bucket={b}
               items={itemsByBucket[b.id] || []}
               members={members}
+              features={features}
               canWrite={canWrite}
-              isAddingItem={adding === b.id}
-              onAddItemStart={() => setAdding(b.id)}
-              onAddItemSubmit={title => addItem(b.id, title)}
-              onAddItemCancel={() => setAdding(null)}
+              onAddItem={() => openCreateModal(b.id)}
               onEdit={() => setBucketEditor({ mode:'edit', bucket: b })}
               onDelete={() => deleteBucket(b)}
               onMoveLeft={i > 0 ? () => moveBucket(b, -1) : null}
@@ -215,7 +249,7 @@ export default function Board({ project, profile, onOpenItem }) {
 
           {canWrite && (
             <button onClick={() => setBucketEditor({ mode:'new' })}
-              className="w-72 shrink-0 self-start mt-0 h-12 flex items-center justify-center gap-2 bg-card/30 hover:bg-card/60 border-2 border-dashed border-bdr hover:border-dim rounded-xl text-sm text-muted hover:text-text transition">
+              className="w-72 shrink-0 self-start mt-0 h-12 flex items-center justify-center gap-2 bg-card/30 hover:bg-card/60 border-2 border-dashed border-bdr hover:border-dim rounded-xl text-sm text-muted hover:text-paper transition">
               <span className="text-base">+</span> Add bucket
             </button>
           )}
@@ -230,11 +264,24 @@ export default function Board({ project, profile, onOpenItem }) {
           onClose={() => setBucketEditor(null)}
         />
       )}
+
+      {creating && (
+        <CreateItemModal
+          draft={creating}
+          buckets={buckets}
+          members={members}
+          features={features}
+          project={project}
+          profile={profile}
+          onSave={submitCreate}
+          onClose={() => setCreating(null)}
+        />
+      )}
     </div>
   );
 }
 
-function BucketColumn({ bucket, items, members, canWrite, isAddingItem, onAddItemStart, onAddItemSubmit, onAddItemCancel, onEdit, onDelete, onMoveLeft, onMoveRight, canDelete, onDragStart, onDragOver, onDrop, onOpenItem }) {
+function BucketColumn({ bucket, items, members, features, canWrite, onAddItem, onEdit, onDelete, onMoveLeft, onMoveRight, canDelete, onDragStart, onDragOver, onDrop, onOpenItem }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -242,55 +289,52 @@ function BucketColumn({ bucket, items, members, canWrite, isAddingItem, onAddIte
       onDragOver={onDragOver} onDrop={e => onDrop(e, bucket.id)}
       onClick={() => setMenuOpen(false)}>
       <div className="px-3 py-2.5 border-b border-bdr flex items-center gap-2 relative" style={{ borderLeft: `3px solid ${bucket.color}` }}>
-        <div className="text-xs font-bold uppercase tracking-wide text-text">{bucket.name}</div>
-        {bucket.is_done && <span className="text-[9px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded">DONE</span>}
+        <div className="text-xs font-bold uppercase tracking-wide text-paper">{bucket.name}</div>
+        {bucket.is_done && <span className="text-[9px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded font-mono">DONE</span>}
         <div className="text-xs text-dim">{items.length}</div>
         {canWrite && (
           <>
-            <button onClick={onAddItemStart} className="ml-auto text-muted hover:text-text text-sm" title="Add item">+</button>
+            <button onClick={onAddItem} className="ml-auto text-muted hover:text-paper text-sm" title="Add item">+</button>
             <button onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
-              className="text-muted hover:text-text text-sm px-1" title="Bucket options">⋯</button>
+              className="text-muted hover:text-paper text-sm px-1" title="Bucket options">&#x22EF;</button>
           </>
         )}
         {menuOpen && (
           <div className="absolute right-1 top-full mt-0.5 z-10 w-40 bg-card border border-bdr rounded-lg shadow-lg overflow-hidden"
             onClick={e => e.stopPropagation()}>
             <button onClick={() => { onEdit(); setMenuOpen(false); }}
-              className="w-full px-3 py-2 text-left text-xs text-text hover:bg-panel flex items-center gap-2">
-              <span>✏️</span> Edit bucket
+              className="w-full px-3 py-2 text-left text-xs text-paper hover:bg-ink-soft flex items-center gap-2">
+              Edit bucket
             </button>
             {onMoveLeft && (
               <button onClick={() => { onMoveLeft(); setMenuOpen(false); }}
-                className="w-full px-3 py-2 text-left text-xs text-text hover:bg-panel flex items-center gap-2 border-t border-bdr">
-                <span>←</span> Move left
+                className="w-full px-3 py-2 text-left text-xs text-paper hover:bg-ink-soft flex items-center gap-2 border-t border-bdr">
+                &#x2190; Move left
               </button>
             )}
             {onMoveRight && (
               <button onClick={() => { onMoveRight(); setMenuOpen(false); }}
-                className="w-full px-3 py-2 text-left text-xs text-text hover:bg-panel flex items-center gap-2 border-t border-bdr">
-                <span>→</span> Move right
+                className="w-full px-3 py-2 text-left text-xs text-paper hover:bg-ink-soft flex items-center gap-2 border-t border-bdr">
+                &#x2192; Move right
               </button>
             )}
             {canDelete && (
               <button onClick={() => { onDelete(); setMenuOpen(false); }}
                 className="w-full px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 flex items-center gap-2 border-t border-bdr">
-                <span>🗑️</span> Delete
+                Delete
               </button>
             )}
           </div>
         )}
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
-        {isAddingItem && (
-          <InlineAdd onAdd={onAddItemSubmit} onCancel={onAddItemCancel}/>
-        )}
         {items.map(i => (
-          <Card key={i.id} item={i} members={members}
+          <Card key={i.id} item={i} members={members} features={features}
             onClick={() => onOpenItem(i.id)}
             onDragStart={e => onDragStart(e, i)}
             draggable={canWrite}/>
         ))}
-        {!items.length && !isAddingItem && (
+        {!items.length && (
           <div className="text-xs text-dim italic px-2 py-4 text-center">Empty</div>
         )}
       </div>
@@ -312,23 +356,23 @@ function BucketEditorModal({ mode, bucket, onSave, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
       <form onSubmit={submit} onClick={e => e.stopPropagation()}
-        className="w-96 bg-panel border border-bdr rounded-xl overflow-hidden shadow-2xl">
+        className="w-96 bg-ink-soft border border-bdr rounded-xl overflow-hidden shadow-2xl">
         <div className="px-5 py-4 border-b border-bdr">
-          <div className="text-base font-bold text-text">{mode === 'new' ? 'New bucket' : 'Edit bucket'}</div>
+          <div className="text-base font-bold text-paper">{mode === 'new' ? 'New bucket' : 'Edit bucket'}</div>
         </div>
         <div className="px-5 py-4 space-y-4">
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-dim mb-1.5">Name</label>
+            <label className="block text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1.5">Name</label>
             <input value={name} onChange={e => setName(e.target.value)} autoFocus
               placeholder="e.g. Ready to test"
-              className="w-full px-3 py-2 bg-card border border-bdr rounded text-sm text-text placeholder-dim focus:outline-none focus:border-accent"/>
+              className="w-full px-3 py-2 bg-card border border-bdr rounded text-sm text-paper placeholder-dim focus:outline-none focus:border-ember"/>
           </div>
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-dim mb-1.5">Colour</label>
+            <label className="block text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1.5">Colour</label>
             <div className="flex flex-wrap gap-1.5">
               {BUCKET_COLORS.map(c => (
                 <button key={c.value} type="button" onClick={() => setColor(c.value)}
-                  className={`w-8 h-8 rounded transition ${color === c.value ? 'ring-2 ring-offset-2 ring-offset-panel ring-text' : 'hover:scale-110'}`}
+                  className={`w-8 h-8 rounded transition ${color === c.value ? 'ring-2 ring-offset-2 ring-offset-ink-soft ring-paper' : 'hover:scale-110'}`}
                   style={{ backgroundColor: c.value }}
                   title={c.name}/>
               ))}
@@ -337,19 +381,19 @@ function BucketEditorModal({ mode, bucket, onSave, onClose }) {
           <div>
             <label className="flex items-start gap-2 cursor-pointer">
               <input type="checkbox" checked={isDone} onChange={e => setIsDone(e.target.checked)}
-                className="mt-0.5"/>
+                className="mt-0.5 accent-ember"/>
               <div className="flex-1">
-                <div className="text-sm text-text">Items in this bucket are considered done</div>
-                <div className="text-xs text-dim">Moving an item here closes it (sets closed_at). Good for Shipped / Released / Won't fix.</div>
+                <div className="text-sm text-paper">Items in this bucket are considered done</div>
+                <div className="text-xs text-dim">Moving an item here closes it (sets closed_at).</div>
               </div>
             </label>
           </div>
         </div>
         <div className="px-5 py-3 border-t border-bdr flex justify-end gap-2">
           <button type="button" onClick={onClose}
-            className="px-3 py-1.5 text-sm text-muted hover:text-text border border-bdr rounded">Cancel</button>
+            className="px-3 py-1.5 text-sm text-muted hover:text-paper border border-bdr rounded">Cancel</button>
           <button type="submit"
-            className="px-4 py-1.5 bg-accent text-white text-sm font-semibold rounded hover:opacity-90">
+            className="px-4 py-1.5 bg-ember text-ink text-sm font-semibold rounded hover:bg-ember-deep transition">
             {mode === 'new' ? 'Create bucket' : 'Save changes'}
           </button>
         </div>
@@ -358,22 +402,165 @@ function BucketEditorModal({ mode, bucket, onSave, onClose }) {
   );
 }
 
-function Card({ item, members, onClick, onDragStart, draggable }) {
+function CreateItemModal({ draft: initial, buckets, members, features, project, profile, onSave, onClose }) {
+  const [draft, setDraft] = useState(initial);
+  const [uploading, setUploading] = useState(false);
+  const set = (k, v) => setDraft({ ...draft, [k]: v });
+  const input = "w-full px-3 py-2 bg-card border border-bdr rounded text-sm text-paper placeholder-dim focus:outline-none focus:border-ember";
+  const label = "text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block";
+
+  const handleImageUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    setUploading(true);
+    const urls = [...(draft.images || [])];
+    for (const file of files) {
+      const ext = file.name.split('.').pop();
+      const path = `items/${crypto.randomUUID()}.${ext}`;
+      const { error } = await supabase.storage.from('item-images').upload(path, file);
+      if (!error) {
+        const { data } = supabase.storage.from('item-images').getPublicUrl(path);
+        urls.push(data.publicUrl);
+      }
+    }
+    set('images', urls);
+    setUploading(false);
+  };
+
+  const removeImage = (idx) => {
+    set('images', draft.images.filter((_, i) => i !== idx));
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
+      <div className="w-[640px] max-w-[90vw] max-h-[85vh] bg-ink-soft border border-bdr rounded-xl overflow-hidden shadow-2xl flex flex-col"
+        onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-bdr flex items-center justify-between">
+          <div className="text-base font-bold text-paper">New item</div>
+          <button onClick={onClose} className="text-muted hover:text-paper text-lg px-2">&#x00D7;</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div>
+            <label className={label}>Title</label>
+            <input className={input} value={draft.title} onChange={e => set('title', e.target.value)} autoFocus placeholder="What needs to be done?"/>
+          </div>
+          <div>
+            <label className={label}>Description (markdown)</label>
+            <textarea className={input + ' resize-none font-mono'} rows={5} value={draft.description} onChange={e => set('description', e.target.value)}
+              placeholder="Steps to reproduce, expected behaviour, context…"/>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={label}>Bucket</label>
+              <select className={input} value={draft.bucket_id} onChange={e => set('bucket_id', e.target.value)}>
+                {buckets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={label}>Type</label>
+              <select className={input} value={draft.type} onChange={e => set('type', e.target.value)}>
+                <option value="feature">Feature</option>
+                <option value="bug">Bug</option>
+                <option value="task">Task</option>
+                <option value="chore">Chore</option>
+              </select>
+            </div>
+            <div>
+              <label className={label}>Priority</label>
+              <select className={input} value={draft.priority} onChange={e => set('priority', e.target.value)}>
+                <option value="P0">P0 — critical</option>
+                <option value="P1">P1 — high</option>
+                <option value="P2">P2 — normal</option>
+                <option value="P3">P3 — low</option>
+              </select>
+            </div>
+            <div>
+              <label className={label}>Assignee</label>
+              <select className={input} value={draft.assignee_id} onChange={e => set('assignee_id', e.target.value)}>
+                <option value="">Unassigned</option>
+                {members.map(m => <option key={m.id} value={m.id}>{m.display_name || m.email}</option>)}
+              </select>
+            </div>
+            {features.length > 0 && (
+              <div>
+                <label className={label}>Feature</label>
+                <select className={input} value={draft.feature_id} onChange={e => set('feature_id', e.target.value)}>
+                  <option value="">No feature</option>
+                  {features.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </div>
+            )}
+            <div>
+              <label className={label}>Version seen</label>
+              <input className={input} value={draft.version_seen} onChange={e => set('version_seen', e.target.value)} placeholder="e.g. 4.6.25"/>
+            </div>
+          </div>
+          <div>
+            <label className={label}>Labels (comma-separated)</label>
+            <input className={input} value={draft.labels} onChange={e => set('labels', e.target.value)} placeholder="bug, kds, printing"/>
+          </div>
+          <div>
+            <label className={label}>Github ref</label>
+            <input className={input} value={draft.github_ref} onChange={e => set('github_ref', e.target.value)} placeholder="pwar2804aio/possystem#123 or @sha"/>
+          </div>
+          <div>
+            <label className={label}>Images</label>
+            <label className={`inline-flex items-center gap-2 px-3 py-2 bg-card border border-bdr rounded text-sm text-muted hover:text-paper hover:border-ember cursor-pointer transition ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+              {uploading ? 'Uploading…' : 'Upload images'}
+              <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden"/>
+            </label>
+            {draft.images?.length > 0 && (
+              <div className="flex gap-2 mt-2 flex-wrap">
+                {draft.images.map((url, idx) => (
+                  <div key={idx} className="relative group w-20 h-20 rounded overflow-hidden border border-bdr">
+                    <img src={url} className="w-full h-full object-cover"/>
+                    <button onClick={() => removeImage(idx)}
+                      className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/70 text-white text-xs rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100">&#x00D7;</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-bdr flex justify-end gap-2">
+          <button onClick={onClose}
+            className="px-4 py-2 text-sm text-muted hover:text-paper border border-bdr rounded">Cancel</button>
+          <button onClick={() => onSave(draft)} disabled={!draft.title.trim()}
+            className="px-5 py-2 bg-ember text-ink text-sm font-semibold rounded hover:bg-ember-deep transition disabled:opacity-50">
+            Create item
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Card({ item, members, features, onClick, onDragStart, draggable }) {
   const assignee = members.find(m => m.id === item.assignee_id);
+  const feature = features.find(f => f.id === item.feature_id);
   return (
     <div draggable={draggable} onDragStart={onDragStart} onClick={onClick}
-      className="bg-panel border border-bdr rounded-lg p-3 cursor-pointer hover:border-dim transition">
+      className="bg-ink-soft border border-bdr rounded-lg p-3 cursor-pointer hover:border-dim transition">
       <div className="flex items-start gap-2 mb-2">
         <span className="text-sm">{TYPE_ICON[item.type] || TYPE_ICON.task}</span>
-        <div className="text-sm text-text flex-1 min-w-0 leading-snug">{item.title}</div>
+        <div className="text-sm text-paper flex-1 min-w-0 leading-snug">{item.title}</div>
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded border ${PRIORITY_STYLES[item.priority]}`}>{item.priority}</span>
-        {(item.labels || []).slice(0,3).map(l => (
+        {feature && (
+          <span className="px-1.5 py-0.5 text-[9px] rounded border font-mono"
+            style={{ borderColor: feature.color + '50', color: feature.color, backgroundColor: feature.color + '15' }}>
+            {feature.name}
+          </span>
+        )}
+        {(item.labels || []).slice(0,2).map(l => (
           <span key={l} className="px-1.5 py-0.5 text-[9px] bg-card border border-bdr rounded text-muted">{l}</span>
         ))}
+        {item.images?.length > 0 && (
+          <span className="text-[9px] text-dim">&#x1F4CE; {item.images.length}</span>
+        )}
         {assignee && (
-          <span className="ml-auto w-5 h-5 rounded-full bg-accent text-white text-[10px] font-bold flex items-center justify-center" title={assignee.display_name || assignee.email}>
+          <span className="ml-auto w-5 h-5 rounded-full bg-ember text-ink text-[10px] font-bold flex items-center justify-center" title={assignee.display_name || assignee.email}>
             {(assignee.display_name || assignee.email)[0].toUpperCase()}
           </span>
         )}
@@ -382,22 +569,10 @@ function Card({ item, members, onClick, onDragStart, draggable }) {
   );
 }
 
-function InlineAdd({ onAdd, onCancel }) {
-  const [t, setT] = useState('');
-  return (
-    <form onSubmit={e => { e.preventDefault(); onAdd(t); setT(''); }}>
-      <input value={t} onChange={e => setT(e.target.value)} autoFocus
-        onKeyDown={e => { if (e.key === 'Escape') onCancel(); }}
-        placeholder="New item title…"
-        className="w-full px-2 py-1.5 bg-panel border border-accent rounded text-sm text-text placeholder-dim focus:outline-none"/>
-    </form>
-  );
-}
-
 function Select({ value, onChange, options }) {
   return (
     <select value={value} onChange={e => onChange(e.target.value)}
-      className="px-2 py-1.5 bg-card border border-bdr rounded text-sm text-text focus:outline-none focus:border-accent">
+      className="px-2 py-1.5 bg-card border border-bdr rounded text-sm text-paper focus:outline-none focus:border-ember">
       {options.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
     </select>
   );

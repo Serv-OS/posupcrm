@@ -5,27 +5,25 @@
 html, body, #root { height: 100%; }
 
 body {
-  background: #0b0d10;
-  color: #e8eaed;
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', ui-sans-serif, system-ui, sans-serif;
-  font-feature-settings: "cv11", "ss01";
+  background: #0E0D0A;
+  color: #F4EDDF;
+  font-family: 'Geist', -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-::selection { background: #6366f1; color: white; }
+::selection { background: #E8743C; color: #0E0D0A; }
 
-/* Scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #242933; border-radius: 5px; }
-::-webkit-scrollbar-thumb:hover { background: #364050; }
+::-webkit-scrollbar-thumb { background: rgba(244,237,223,0.10); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(244,237,223,0.18); }
 
-/* Markdown */
 .prose-tight p { margin: 0.3em 0; }
 .prose-tight h1, .prose-tight h2, .prose-tight h3 { margin: 0.6em 0 0.3em; font-weight: 700; }
 .prose-tight h1 { font-size: 1.2em; }
 .prose-tight h2 { font-size: 1.1em; }
 .prose-tight h3 { font-size: 1.05em; }
-.prose-tight code { background: #0b0d10; padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
-.prose-tight pre { background: #0b0d10; padding: 10px; border-radius: 6px; overflow-x: auto; }
+.prose-tight code { background: #17150F; padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
+.prose-tight pre { background: #17150F; padding: 10px; border-radius: 6px; overflow-x: auto; }
 .prose-tight ul, .prose-tight ol { margin: 0.3em 0; padding-left: 1.5em; }
-.prose-tight a { color: #818cf8; text-decoration: underline; }
+.prose-tight a { color: #E8743C; text-decoration: underline; }

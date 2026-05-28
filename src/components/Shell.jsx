@@ -3,13 +3,14 @@ import { supabase } from '../lib/supabase';
 import Sidebar from './Sidebar.jsx';
 import Board from './Board.jsx';
 import UsersPanel from './UsersPanel.jsx';
+import FeaturesPanel from './FeaturesPanel.jsx';
 import ItemDetail from './ItemDetail.jsx';
 
 export default function Shell({ session }) {
   const [profile, setProfile]   = useState(null);
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
-  const [view, setView]         = useState('board');  // 'board' | 'users'
+  const [view, setView]         = useState('board');
   const [openItem, setOpenItem] = useState(null);
 
   useEffect(() => {
@@ -52,6 +53,8 @@ export default function Shell({ session }) {
       <main className="flex-1 min-w-0 overflow-hidden">
         {view === 'users' ? (
           <UsersPanel profile={profile}/>
+        ) : view === 'features' && activeProject ? (
+          <FeaturesPanel project={activeProject} profile={profile}/>
         ) : activeProject ? (
           <Board project={activeProject} profile={profile} onOpenItem={setOpenItem}/>
         ) : (

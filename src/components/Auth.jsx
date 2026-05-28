@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { supabase, APP_URL } from '../lib/supabase';
+import { LogoMark, Wordmark } from './ServOSLogo.jsx';
 
 export default function Auth() {
   const [email, setEmail]     = useState('');
@@ -21,17 +22,19 @@ export default function Auth() {
   return (
     <div className="h-full flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="text-4xl mb-3">🎯</div>
-          <div className="text-2xl font-bold text-text mb-1">Posupject</div>
-          <div className="text-sm text-muted">Sign in to continue</div>
+        <div className="text-center mb-8 flex flex-col items-center">
+          <LogoMark size={56}/>
+          <div className="mt-4">
+            <Wordmark className="!text-4xl"/>
+          </div>
+          <div className="text-sm text-muted mt-2 font-mono text-[10px] uppercase tracking-[0.18em]">Posupject</div>
         </div>
 
         {sent ? (
-          <div className="bg-panel border border-bdr rounded-xl p-6 text-center">
-            <div className="text-2xl mb-3">✉️</div>
-            <div className="text-sm text-text font-semibold mb-1">Check your email</div>
-            <div className="text-xs text-muted">We sent a magic link to <span className="text-text">{email}</span></div>
+          <div className="bg-ink-soft border border-bdr rounded-xl p-6 text-center">
+            <div className="text-2xl mb-3">&#x2709;&#xFE0F;</div>
+            <div className="text-sm text-paper font-semibold mb-1">Check your email</div>
+            <div className="text-xs text-muted">We sent a magic link to <span className="text-paper">{email}</span></div>
           </div>
         ) : (
           <form onSubmit={send} className="space-y-3">
@@ -39,11 +42,11 @@ export default function Auth() {
               type="email" required autoFocus
               value={email} onChange={e => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full px-4 py-3 bg-panel border border-bdr rounded-lg text-text placeholder-dim text-sm focus:outline-none focus:border-accent"
+              className="w-full px-4 py-3 bg-ink-soft border border-bdr rounded-lg text-paper placeholder-dim text-sm focus:outline-none focus:border-ember"
             />
             <button
               type="submit" disabled={sending || !email}
-              className="w-full px-4 py-3 bg-accent text-white font-semibold rounded-lg text-sm disabled:opacity-50 hover:bg-indigo-500 transition"
+              className="w-full px-4 py-3 bg-ember text-ink font-semibold rounded-lg text-sm disabled:opacity-50 hover:bg-ember-deep transition"
             >
               {sending ? 'Sending…' : 'Send magic link'}
             </button>
