@@ -8,18 +8,19 @@ const STATUS_STYLES = {
   done: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
 };
 const PRIORITY_STYLES = {
-  P0: 'bg-red-100 text-red-700 border border-red-200 border-red-200',
-  P1: 'bg-orange-100 text-orange-700 border border-orange-200 border-orange-500/30',
-  P2: 'bg-blue-100 text-blue-700 border border-blue-200 border-blue-500/30',
-  P3: 'bg-slate-100 text-slate-600 border border-slate-200 border-slate-500/30',
+  P0: 'bg-red-100 text-red-700 border border-red-200',
+  P1: 'bg-orange-100 text-orange-700 border border-orange-200',
+  P2: 'bg-blue-100 text-blue-700 border border-blue-200',
+  P3: 'bg-slate-100 text-slate-600 border border-slate-200',
 };
 
 export default function TaskList({ profile, onSelect }) {
-  const [tasks, setTasks] = useState([]);
+  const [allTasks, setAllTasks] = useState([]);
   const [members, setMembers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ status: 'open', assignee: 'all', search: '' });
+  const [expanded, setExpanded] = useState({});
   const [showCreate, setShowCreate] = useState(false);
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState('P2');
@@ -34,18 +35,33 @@ export default function TaskList({ profile, onSelect }) {
   const load = async () => {
     setLoading(true);
     const [t, m, p] = await Promise.all([
-      supabase.from('tasks').select('*').is('parent_task_id', null).order('sort_order'),
+      supabase.from('tasks').select('*').order('sort_order'),
       supabase.from('profiles').select('id, email, display_name'),
       supabase.from('crm_projects').select('id, name').eq('status', 'active').order('name'),
     ]);
-    setTasks(t.data || []);
+    setAllTasks(t.data || []);
     setMembers(m.data || []);
     setProjects(p.data || []);
     setLoading(false);
   };
 
+  // Build parent/child lookup
+  const childMap = useMemo(() => {
+    const map = {};
+    allTasks.forEach(t => {
+      if (t.parent_task_id) {
+        if (!map[t.parent_task_id]) map[t.parent_task_id] = [];
+        map[t.parent_task_id].push(t);
+      }
+    });
+    return map;
+  }, [allTasks]);
+
+  // Top-level tasks only for the main list
+  const topLevelTasks = useMemo(() => allTasks.filter(t => !t.parent_task_id), [allTasks]);
+
   const filtered = useMemo(() => {
-    let result = tasks;
+    let result = topLevelTasks;
     if (filter.status === 'open') result = result.filter(t => t.status !== 'done');
     else if (filter.status !== 'all') result = result.filter(t => t.status === filter.status);
     if (filter.assignee === 'me') result = result.filter(t => t.owner_id === profile.id);
@@ -55,7 +71,7 @@ export default function TaskList({ profile, onSelect }) {
       result = result.filter(t => t.title.toLowerCase().includes(q));
     }
     return result;
-  }, [tasks, filter, profile.id]);
+  }, [topLevelTasks, filter, profile.id]);
 
   const ownerName = (id) => {
     const m = members.find(u => u.id === id);
@@ -90,9 +106,105 @@ export default function TaskList({ profile, onSelect }) {
     load();
   };
 
+  const toggleExpand = (e, taskId) => {
+    e.stopPropagation();
+    setExpanded(prev => ({ ...prev, [taskId]: !prev[taskId] }));
+  };
+
   const isOverdue = (t) => t.due_date && t.status !== 'done' && new Date(t.due_date) < new Date();
 
+  const subtaskSummary = (taskId) => {
+    const kids = childMap[taskId] || [];
+    if (!kids.length) return null;
+    const done = kids.filter(k => k.status === 'done').length;
+    return { total: kids.length, done };
+  };
+
   const input = "w-full px-3 py-2 bg-card border border-bdr rounded text-sm text-paper placeholder-dim focus:outline-none focus:border-ember";
+
+  const renderTask = (t, depth = 0) => {
+    const kids = childMap[t.id] || [];
+    const hasKids = kids.length > 0;
+    const isExpanded = expanded[t.id];
+    const sub = subtaskSummary(t.id);
+
+    return (
+      <div key={t.id}>
+        <div
+          onClick={() => onSelect(t.id)}
+          className={`px-6 py-3 border-b border-bdr hover:bg-card/50 cursor-pointer transition flex items-center gap-3`}
+          style={{ paddingLeft: `${24 + depth * 28}px` }}>
+
+          {/* Expand/collapse toggle */}
+          {hasKids ? (
+            <button onClick={(e) => toggleExpand(e, t.id)}
+              className="w-5 h-5 flex items-center justify-center text-muted hover:text-paper shrink-0 text-xs transition"
+              title={isExpanded ? 'Collapse subtasks' : 'Expand subtasks'}>
+              <span className={`inline-block transition-transform ${isExpanded ? 'rotate-90' : ''}`}>&#x25B6;</span>
+            </button>
+          ) : (
+            <div className="w-5 shrink-0" />
+          )}
+
+          {/* Checkbox */}
+          {canWrite && (
+            <button onClick={(e) => toggleDone(e, t)}
+              className={`w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center transition ${
+                t.status === 'done' ? 'bg-emerald-100 border-emerald-500 text-emerald-600' : 'border-slate-300 hover:border-ember'
+              }`}>
+              {t.status === 'done' && <span className="text-xs">&#x2713;</span>}
+            </button>
+          )}
+
+          {/* Title + meta */}
+          <div className="flex-1 min-w-0">
+            <div className={`text-sm ${t.status === 'done' ? 'text-dim line-through' : 'text-paper'}`}>
+              {t.title}
+            </div>
+            <div className="flex items-center gap-2 mt-0.5 text-xs text-dim">
+              {projectName(t.project_id) && <span>{projectName(t.project_id)}</span>}
+              {t.subject_type && <span>{t.subject_type}</span>}
+              {sub && !isExpanded && (
+                <span className="text-muted">
+                  {sub.done}/{sub.total} subtasks
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Subtask progress pill */}
+          {sub && (
+            <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded ${
+              sub.done === sub.total ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
+            }`}>
+              {sub.done}/{sub.total}
+            </span>
+          )}
+
+          <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded border ${PRIORITY_STYLES[t.priority]}`}>{t.priority}</span>
+          <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${STATUS_STYLES[t.status]}`}>{t.status.replace('_', ' ')}</span>
+          {t.due_date && (
+            <span className={`text-xs ${isOverdue(t) ? 'text-red-600 font-bold' : 'text-dim'}`}>
+              {new Date(t.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+            </span>
+          )}
+          {t.owner_id && (
+            <span className="w-6 h-6 rounded-full bg-ember text-white text-[10px] font-bold flex items-center justify-center shrink-0"
+              title={ownerName(t.owner_id)}>
+              {ownerName(t.owner_id)[0]?.toUpperCase() || '?'}
+            </span>
+          )}
+        </div>
+
+        {/* Subtasks (indented, collapsible) */}
+        {hasKids && isExpanded && (
+          <div className="bg-ink-soft/50">
+            {kids.map(kid => renderTask(kid, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -100,12 +212,13 @@ export default function TaskList({ profile, onSelect }) {
         <div>
           <div className="text-lg font-bold text-paper">Tasks</div>
           <div className="text-[10px] text-dim font-mono uppercase tracking-[0.18em]">
-            {tasks.filter(t => t.status !== 'done').length} open / {tasks.filter(t => t.status === 'done').length} done
+            {topLevelTasks.filter(t => t.status !== 'done').length} open / {topLevelTasks.filter(t => t.status === 'done').length} done
+            {allTasks.length !== topLevelTasks.length && ` / ${allTasks.length - topLevelTasks.length} subtasks`}
           </div>
         </div>
         {canWrite && (
           <button onClick={() => setShowCreate(true)}
-            className="px-3 py-1.5 bg-ember text-ink text-sm font-semibold rounded hover:bg-ember-deep transition">
+            className="px-3 py-1.5 bg-ember text-white text-sm font-semibold rounded hover:bg-ember-deep transition">
             + Add task
           </button>
         )}
@@ -153,7 +266,7 @@ export default function TaskList({ profile, onSelect }) {
                 <option value="">No project</option>
                 {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
-              <button type="submit" className="px-4 py-2 bg-ember text-ink text-sm font-semibold rounded shrink-0">Create</button>
+              <button type="submit" className="px-4 py-2 bg-ember text-white text-sm font-semibold rounded shrink-0">Create</button>
               <button type="button" onClick={() => setShowCreate(false)}
                 className="px-3 py-2 text-sm text-muted border border-bdr rounded shrink-0">Cancel</button>
             </div>
@@ -163,40 +276,7 @@ export default function TaskList({ profile, onSelect }) {
 
       <div className="flex-1 overflow-y-auto">
         {loading && <div className="px-6 py-8 text-center text-dim text-sm">Loading...</div>}
-        {!loading && filtered.map(t => (
-          <div key={t.id}
-            onClick={() => onSelect(t.id)}
-            className="px-6 py-3 border-b border-bdr hover:bg-card/50 cursor-pointer transition flex items-center gap-3">
-            {canWrite && (
-              <button onClick={(e) => toggleDone(e, t)}
-                className={`w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center transition ${
-                  t.status === 'done' ? 'bg-green-500/30 border-green-500 text-emerald-600' : 'border-bdr hover:border-ember'
-                }`}>
-                {t.status === 'done' && <span className="text-xs">&#x2713;</span>}
-              </button>
-            )}
-            <div className="flex-1 min-w-0">
-              <div className={`text-sm ${t.status === 'done' ? 'text-dim line-through' : 'text-paper'}`}>{t.title}</div>
-              <div className="flex items-center gap-2 mt-0.5 text-xs text-dim">
-                {projectName(t.project_id) && <span>{projectName(t.project_id)}</span>}
-                {t.subject_type && <span>{t.subject_type}</span>}
-              </div>
-            </div>
-            <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded border ${PRIORITY_STYLES[t.priority]}`}>{t.priority}</span>
-            <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${STATUS_STYLES[t.status]}`}>{t.status.replace('_', ' ')}</span>
-            {t.due_date && (
-              <span className={`text-xs ${isOverdue(t) ? 'text-red-600 font-bold' : 'text-dim'}`}>
-                {new Date(t.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-              </span>
-            )}
-            {t.owner_id && (
-              <span className="w-6 h-6 rounded-full bg-ember text-ink text-[10px] font-bold flex items-center justify-center shrink-0"
-                title={ownerName(t.owner_id)}>
-                {ownerName(t.owner_id)[0]?.toUpperCase() || '?'}
-              </span>
-            )}
-          </div>
-        ))}
+        {!loading && filtered.map(t => renderTask(t))}
         {!loading && filtered.length === 0 && (
           <div className="px-6 py-8 text-center text-dim text-sm">
             {filter.search || filter.status !== 'open' || filter.assignee !== 'all'
