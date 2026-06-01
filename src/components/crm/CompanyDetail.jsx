@@ -52,6 +52,19 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate 
   };
   const set = (k, v) => setDraft({ ...draft, [k]: v });
 
+  const createLinkedProject = async () => {
+    const name = prompt(`Project name for ${company.name}:`);
+    if (!name?.trim()) return;
+    const { data } = await supabase.from('crm_projects').insert({
+      name: name.trim(),
+      subject_type: 'company',
+      subject_id: companyId,
+      owner_id: profile.id,
+    }).select().single();
+    if (data) onNavigate?.('project', data.id);
+    else load();
+  };
+
   const addLocation = async () => {
     const name = prompt('Location name:');
     if (!name?.trim()) return;
@@ -217,7 +230,8 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate 
                 ) : <Empty>No tickets</Empty>}
               </Card>
 
-              <Card title="Projects" count={projects.length}>
+              <Card title="Projects" count={projects.length}
+                action={canWrite ? { label: '+ Create', onClick: createLinkedProject } : null}>
                 {projects.length > 0 ? (
                   <div className="space-y-2">
                     {projects.map(p => (

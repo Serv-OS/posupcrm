@@ -148,9 +148,9 @@ export default function ModulesPanel({ profile }) {
             <tbody>
               {(selectedLocation === 'all' ? locations : locations.filter(l => l.id === selectedLocation)).map(loc => (
                 <tr key={loc.id} className="border-b border-bdr hover:bg-card/30">
-                  <td className="px-4 py-2 text-xs text-paper sticky left-0 bg-ink z-10">
-                    <div className="font-medium">{loc.name}</div>
-                    <div className="text-dim">{companyName(loc.company_id)}</div>
+                  <td className="px-4 py-2.5 sticky left-0 bg-ink z-10">
+                    <div className="text-sm font-medium text-paper">{loc.name}</div>
+                    <div className="text-xs text-ember">{companyName(loc.company_id)}</div>
                   </td>
                   {modules.map(mod => {
                     const lm = getLocationModuleStatus(loc.id, mod.id);

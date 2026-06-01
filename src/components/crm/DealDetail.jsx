@@ -20,6 +20,7 @@ export default function DealDetail({ dealId, profile, onClose, onNavigate }) {
   const [members, setMembers] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [history, setHistory] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [tab, setTab] = useState('overview');
@@ -29,16 +30,18 @@ export default function DealDetail({ dealId, profile, onClose, onNavigate }) {
   useEffect(() => { load(); }, [dealId]);
 
   const load = async () => {
-    const [d, m, c, h] = await Promise.all([
+    const [d, m, c, h, prj] = await Promise.all([
       supabase.from('deals').select('*').eq('id', dealId).single(),
       supabase.from('profiles').select('id, email, display_name'),
       supabase.from('companies').select('id, name').order('name'),
       supabase.from('stage_history').select('*').eq('object_type', 'deal').eq('object_id', dealId).order('changed_at', { ascending: false }),
+      supabase.from('crm_projects').select('*').eq('subject_type', 'deal').eq('subject_id', dealId).order('created_at', { ascending: false }),
     ]);
     setDeal(d.data);
     setMembers(m.data || []);
     setCompanies(c.data || []);
     setHistory(h.data || []);
+    setProjects(prj.data || []);
     if (d.data?.company_id) {
       setCompany(c.data?.find(co => co.id === d.data.company_id) || null);
     }
@@ -86,6 +89,18 @@ export default function DealDetail({ dealId, profile, onClose, onNavigate }) {
       if (ob) alert('Onboarding created automatically for this deal.');
     }
     load();
+  };
+
+  const createLinkedProject = async () => {
+    const name = prompt(`Project name for deal "${deal?.name}":`);
+    if (!name?.trim()) return;
+    const { data } = await supabase.from('crm_projects').insert({
+      name: name.trim(),
+      subject_type: 'deal',
+      subject_id: dealId,
+      owner_id: profile.id,
+    }).select().single();
+    if (data) onNavigate?.('project', data.id);
   };
 
   if (!deal) return <div className="h-full flex items-center justify-center text-dim text-sm">Loading...</div>;
@@ -146,6 +161,7 @@ export default function DealDetail({ dealId, profile, onClose, onNavigate }) {
         {tabBtn('overview', 'Overview')}
         {tabBtn('contacts', 'Contacts')}
         {tabBtn('locations', 'Locations')}
+        {tabBtn('projects', 'Projects')}
         {tabBtn('history', 'Stage History')}
         {tabBtn('activity', 'Activity')}
       </div>
@@ -214,6 +230,27 @@ export default function DealDetail({ dealId, profile, onClose, onNavigate }) {
 
           {tab === 'locations' && (
             <AssociationManager subjectType="deal" subjectId={dealId} targetType="location" profile={profile} onNavigate={onNavigate} />
+          )}
+
+          {tab === 'projects' && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">Projects ({projects.length})</div>
+                {canWrite && (
+                  <button onClick={createLinkedProject} className="px-2 py-1 text-xs text-ember hover:text-ember-deep">+ Create project</button>
+                )}
+              </div>
+              <div className="space-y-2">
+                {projects.map(p => (
+                  <div key={p.id} onClick={() => onNavigate?.('project', p.id)}
+                    className="p-3 glass-inner rounded-xl cursor-pointer">
+                    <div className="text-sm font-medium text-paper">{p.name}</div>
+                    <div className="text-xs text-muted mt-0.5">{p.status}</div>
+                  </div>
+                ))}
+                {projects.length === 0 && <div className="text-xs text-dim italic py-3 text-center">No projects linked to this deal.</div>}
+              </div>
+            </div>
           )}
 
           {tab === 'history' && (

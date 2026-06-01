@@ -60,6 +60,19 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
   };
   const set = (k, v) => setDraft({ ...draft, [k]: v });
 
+  const createLinkedProject = async () => {
+    const name = prompt(`Project name for ${location?.name}:`);
+    if (!name?.trim()) return;
+    const { data } = await supabase.from('crm_projects').insert({
+      name: name.trim(),
+      subject_type: 'location',
+      subject_id: locationId,
+      owner_id: profile.id,
+    }).select().single();
+    if (data) onNavigate?.('project', data.id);
+    else load();
+  };
+
   const ownerName = (id) => { const m = members.find(u => u.id === id); return m ? (m.display_name || m.email.split('@')[0]) : 'Unassigned'; };
 
   if (!location) return <div className="h-full flex items-center justify-center text-dim text-sm">Loading...</div>;
@@ -201,7 +214,8 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
                 ) : <Empty>No onboardings</Empty>}
               </Card>
 
-              <Card title="Projects" count={projects.length}>
+              <Card title="Projects" count={projects.length}
+                action={canWrite ? { label: '+ Create', onClick: createLinkedProject } : null}>
                 {projects.length > 0 ? (
                   <div className="space-y-2">
                     {projects.map(p => (
@@ -212,7 +226,7 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
                       </div>
                     ))}
                   </div>
-                ) : <Empty>No projects linked to this location</Empty>}
+                ) : <Empty>No projects linked</Empty>}
               </Card>
             </div>
           </div>
