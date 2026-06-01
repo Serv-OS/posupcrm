@@ -127,7 +127,7 @@ export default function Shell({ session }) {
       case 'tasks':
         return <TaskList profile={profile} onSelect={(id) => { setView('task_detail'); setDetailId(id); }} />;
       case 'task_detail':
-        return <TaskDetail taskId={detailId} profile={profile} onClose={() => setView('tasks')} />;
+        return <TaskDetail taskId={detailId} profile={profile} onClose={() => setView('tasks')} onNavigate={navigateTo} />;
       case 'projects':
         return <ProjectList profile={profile} onSelect={(id) => { setView('project_detail'); setDetailId(id); }} />;
       case 'project_detail':
