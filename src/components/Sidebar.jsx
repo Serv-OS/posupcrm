@@ -192,9 +192,12 @@ export default function Sidebar({ profile, projects, activeProject, setActivePro
           { key: 'locations', icon: '\u{1F4CD}', label: 'Locations' },
           { key: 'deals',      icon: '\u{1F4B0}', label: 'Deals' },
           { key: 'onboarding',icon: '\u{1F680}', label: 'Onboarding' },
-          { key: 'tickets',   icon: '\u{1F3AB}', label: 'Tickets' },
-          { key: 'tasks',     icon: '\u{2611}',  label: 'Tasks' },
-          { key: 'projects',  icon: '\u{1F4C1}', label: 'Projects' },
+          { key: 'tickets',          icon: '\u{1F3AB}', label: 'Tickets' },
+          { key: 'modules',          icon: '\u{1F9E9}', label: 'Modules' },
+          { key: 'tasks',            icon: '\u{2611}',  label: 'Tasks' },
+          { key: 'projects',         icon: '\u{1F4C1}', label: 'Projects' },
+          { key: 'feature_requests', icon: '\u{1F4A1}', label: 'Feature Requests' },
+          { key: 'releases',         icon: '\u{1F4E6}', label: 'Releases' },
         ].map(item => (
           <button key={item.key} onClick={() => setView(item.key)}
             className={`w-full px-3 py-2 text-left rounded-lg text-sm flex items-center gap-2 ${

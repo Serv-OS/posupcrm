@@ -21,6 +21,11 @@ import OnboardingBoard from './crm/OnboardingBoard.jsx';
 import OnboardingDetail from './crm/OnboardingDetail.jsx';
 import TicketList from './crm/TicketList.jsx';
 import TicketDetail from './crm/TicketDetail.jsx';
+import ModulesPanel from './crm/ModulesPanel.jsx';
+import FeatureRequestList from './crm/FeatureRequestList.jsx';
+import FeatureRequestDetail from './crm/FeatureRequestDetail.jsx';
+import ReleaseList from './crm/ReleaseList.jsx';
+import ReleaseDetail from './crm/ReleaseDetail.jsx';
 
 export default function Shell({ session }) {
   const [profile, setProfile]   = useState(null);
@@ -101,6 +106,16 @@ export default function Shell({ session }) {
         return <TicketList profile={profile} onSelect={(id) => { setView('ticket_detail'); setDetailId(id); }} onNavigate={navigateTo} />;
       case 'ticket_detail':
         return <TicketDetail ticketId={detailId} profile={profile} onClose={() => setView('tickets')} onNavigate={navigateTo} />;
+      case 'modules':
+        return <ModulesPanel profile={profile} />;
+      case 'feature_requests':
+        return <FeatureRequestList profile={profile} onSelect={(id) => { setView('feature_request_detail'); setDetailId(id); }} />;
+      case 'feature_request_detail':
+        return <FeatureRequestDetail requestId={detailId} profile={profile} onClose={() => setView('feature_requests')} onNavigate={navigateTo} />;
+      case 'releases':
+        return <ReleaseList profile={profile} onSelect={(id) => { setView('release_detail'); setDetailId(id); }} />;
+      case 'release_detail':
+        return <ReleaseDetail releaseId={detailId} profile={profile} onClose={() => setView('releases')} />;
       case 'tasks':
         return <TaskList profile={profile} onSelect={(id) => { setView('task_detail'); setDetailId(id); }} />;
       case 'task_detail':
