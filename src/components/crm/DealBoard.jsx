@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
+import { handleClosedWon } from '../../lib/dealHelpers';
 
 const STAGES = [
   { key: 'new_lead',       label: 'New Lead',       color: '#3b82f6' },
@@ -79,6 +80,11 @@ export default function DealBoard({ profile, onSelectDeal, onNavigate }) {
       to_stage: toStage,
       changed_by: profile.id,
     });
+    // Auto-create onboarding on closed_won
+    if (toStage === 'closed_won') {
+      const ob = await handleClosedWon(dealId, profile.id);
+      if (ob) alert('Onboarding created automatically for this deal.');
+    }
     load();
   };
 

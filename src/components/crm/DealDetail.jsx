@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { handleClosedWon } from '../../lib/dealHelpers';
 import AssociationManager from './AssociationManager.jsx';
 import ActivityTimeline from './ActivityTimeline.jsx';
 
@@ -59,6 +60,10 @@ export default function DealDetail({ dealId, profile, onClose, onNavigate }) {
         object_type: 'deal', object_id: dealId,
         from_stage: oldStage, to_stage: patch.stage, changed_by: profile.id,
       });
+      if (patch.stage === 'closed_won') {
+        const ob = await handleClosedWon(dealId, profile.id);
+        if (ob) alert('Onboarding created automatically for this deal.');
+      }
     }
     setEditing(false);
     load();
@@ -76,6 +81,10 @@ export default function DealDetail({ dealId, profile, onClose, onNavigate }) {
       object_type: 'deal', object_id: dealId,
       from_stage: deal.stage, to_stage: newStage, changed_by: profile.id,
     });
+    if (newStage === 'closed_won') {
+      const ob = await handleClosedWon(dealId, profile.id);
+      if (ob) alert('Onboarding created automatically for this deal.');
+    }
     load();
   };
 
