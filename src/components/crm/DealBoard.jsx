@@ -193,7 +193,7 @@ export default function DealBoard({ profile, onSelectDeal, onNavigate }) {
                       draggable={canWrite}
                       onDragStart={e => onDragStart(e, d)}
                       onClick={() => onSelectDeal(d.id)}
-                      className="bg-ink-soft border border-bdr rounded-lg p-2.5 cursor-pointer hover:border-dim transition">
+                      className="glass-inner rounded-xl p-2.5 cursor-pointer">
                       <div className="text-xs text-paper font-medium leading-snug mb-1">{d.name}</div>
                       <div className="text-[10px] text-dim truncate">{companyName(d.company_id)}</div>
                       <div className="flex items-center gap-1.5 mt-1.5">

@@ -83,7 +83,7 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate 
           </div>
         </div>
         {canWrite && !editing && (
-          <button onClick={startEdit} className="px-4 py-2 bg-card border border-bdr rounded text-sm text-muted hover:text-paper transition">Edit</button>
+          <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>
         )}
       </div>
 
@@ -140,7 +140,7 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate 
                   <div className="space-y-2">
                     {locations.map(l => (
                       <div key={l.id} onClick={() => onNavigate?.('location', l.id)}
-                        className="flex items-center gap-3 p-3 bg-ink-soft border border-bdr rounded-lg cursor-pointer hover:border-ember transition">
+                        className="flex items-center gap-3 p-3 glass-inner rounded-xl cursor-pointer">
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-paper">{l.name}</div>
                           <div className="text-xs text-muted">{[l.venue_type, l.city].filter(Boolean).join(' / ')}</div>
@@ -173,7 +173,7 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate 
                   <div className="space-y-2">
                     {deals.map(d => (
                       <div key={d.id} onClick={() => onNavigate?.('deal', d.id)}
-                        className="p-3 bg-ink-soft border border-bdr rounded-lg cursor-pointer hover:border-ember transition">
+                        className="p-3 glass-inner rounded-xl cursor-pointer">
                         <div className="text-sm font-medium text-paper">{d.name}</div>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-xs text-ember font-mono font-bold">{d.value ? `£${Number(d.value).toLocaleString()}` : ''}</span>
@@ -190,7 +190,7 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate 
                   <div className="space-y-2">
                     {onboardings.map(o => (
                       <div key={o.id} onClick={() => onNavigate?.('onboarding', o.id)}
-                        className="p-3 bg-ink-soft border border-bdr rounded-lg cursor-pointer hover:border-ember transition">
+                        className="p-3 glass-inner rounded-xl cursor-pointer">
                         <div className="text-sm font-medium text-paper">Onboarding</div>
                         <div className="text-xs text-muted mt-0.5">{o.stage.replace(/_/g, ' ')}</div>
                       </div>
@@ -204,7 +204,7 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate 
                   <div className="space-y-2">
                     {tickets.slice(0, 5).map(t => (
                       <div key={t.id} onClick={() => onNavigate?.('ticket', t.id)}
-                        className="p-3 bg-ink-soft border border-bdr rounded-lg cursor-pointer hover:border-ember transition">
+                        className="p-3 glass-inner rounded-xl cursor-pointer">
                         <div className="text-sm text-paper">{t.subject}</div>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-[10px] text-muted uppercase">{t.stage.replace(/_/g, ' ')}</span>
@@ -222,7 +222,7 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate 
                   <div className="space-y-2">
                     {projects.map(p => (
                       <div key={p.id} onClick={() => onNavigate?.('project', p.id)}
-                        className="p-3 bg-ink-soft border border-bdr rounded-lg cursor-pointer hover:border-ember transition">
+                        className="p-3 glass-inner rounded-xl cursor-pointer">
                         <div className="text-sm font-medium text-paper">{p.name}</div>
                         <div className="text-xs text-muted mt-0.5">{p.status}</div>
                       </div>

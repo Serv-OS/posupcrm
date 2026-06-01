@@ -54,7 +54,7 @@ export default function ContactDetail({ contactId, profile, onClose, onNavigate 
           </div>
         </div>
         {canWrite && !editing && (
-          <button onClick={startEdit} className="px-4 py-2 bg-card border border-bdr rounded text-sm text-muted hover:text-paper transition">Edit</button>
+          <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>
         )}
       </div>
 

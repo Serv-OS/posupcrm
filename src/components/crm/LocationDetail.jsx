@@ -74,18 +74,23 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-bdr flex items-center gap-3">
+      <div className="px-6 py-5 border-b border-bdr flex items-center gap-4">
         <button onClick={onClose} className="text-muted hover:text-paper text-lg">&larr;</button>
         <div className="flex-1 min-w-0">
-          <div className="text-xl font-bold text-paper truncate">{location.name}</div>
-          <div className="text-xs text-muted mt-0.5">
-            <span className="text-ember cursor-pointer hover:underline" onClick={() => onNavigate?.('company', location.company_id)}>{company?.name}</span>
-            {' / '}{location.venue_type || 'No type'}
-            {' / '}<span className={`px-1.5 py-0.5 text-[10px] font-bold uppercase rounded ${STATUS_COLORS[location.status] || ''}`}>{location.status}</span>
+          <div className="flex items-center gap-3 mb-1.5">
+            <div className="text-xl font-bold text-paper truncate">{location.name}</div>
+            <span className={`badge-status ${STATUS_COLORS[location.status] || ''}`}>{location.status}</span>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="badge-company" onClick={() => onNavigate?.('company', location.company_id)}>
+              {'\u{1F3E2}'} {company?.name || 'Unknown company'}
+            </span>
+            {location.venue_type && <span className="text-xs text-muted">{location.venue_type}</span>}
+            {location.covers && <span className="text-xs text-muted">{location.covers} covers</span>}
           </div>
         </div>
         {canWrite && !editing && (
-          <button onClick={startEdit} className="px-4 py-2 bg-card border border-bdr rounded text-sm text-muted hover:text-paper transition">Edit</button>
+          <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>
         )}
       </div>
 
@@ -170,7 +175,7 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
                   <div className="space-y-2">
                     {deals.map(d => (
                       <div key={d.id} onClick={() => onNavigate?.('deal', d.id)}
-                        className="p-3 bg-ink-soft border border-bdr rounded-lg cursor-pointer hover:border-ember transition">
+                        className="p-3 glass-inner rounded-xl cursor-pointer">
                         <div className="text-sm font-medium text-paper">{d.name}</div>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-xs text-ember font-mono font-bold">{d.value ? `£${Number(d.value).toLocaleString()}` : ''}</span>
@@ -187,7 +192,7 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
                   <div className="space-y-2">
                     {onboardings.map(o => (
                       <div key={o.id} onClick={() => onNavigate?.('onboarding', o.id)}
-                        className="p-3 bg-ink-soft border border-bdr rounded-lg cursor-pointer hover:border-ember transition">
+                        className="p-3 glass-inner rounded-xl cursor-pointer">
                         <div className="text-sm font-medium text-paper">Onboarding</div>
                         <div className="text-xs text-muted mt-0.5">{OB_STAGES[o.stage] || o.stage}</div>
                       </div>
@@ -201,7 +206,7 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
                   <div className="space-y-2">
                     {projects.map(p => (
                       <div key={p.id} onClick={() => onNavigate?.('project', p.id)}
-                        className="p-3 bg-ink-soft border border-bdr rounded-lg cursor-pointer hover:border-ember transition">
+                        className="p-3 glass-inner rounded-xl cursor-pointer">
                         <div className="text-sm font-medium text-paper">{p.name}</div>
                         <div className="text-xs text-muted mt-0.5">{p.status}</div>
                       </div>

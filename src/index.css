@@ -5,109 +5,220 @@
 html, body, #root { height: 100%; }
 
 body {
-  background: #0E0D0A;
+  background: #070604;
   color: #F4EDDF;
   font-family: 'Geist', -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Subtle ambient mesh gradient behind everything */
+/* Rich ambient background -- gives the glass something to blur over */
 #root {
   background:
-    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(232,116,60,0.04) 0%, transparent 50%),
-    radial-gradient(ellipse 60% 50% at 80% 90%, rgba(99,102,241,0.03) 0%, transparent 50%),
-    radial-gradient(ellipse 70% 70% at 50% 50%, rgba(30,28,22,0.5) 0%, transparent 70%);
+    radial-gradient(ellipse 100% 80% at 15% 5%, rgba(232,116,60,0.07) 0%, transparent 50%),
+    radial-gradient(ellipse 80% 60% at 85% 95%, rgba(99,102,241,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 50% at 50% 30%, rgba(168,85,247,0.03) 0%, transparent 50%),
+    linear-gradient(180deg, #0B0A07 0%, #070604 100%);
 }
 
-::selection { background: #E8743C; color: #0E0D0A; }
+::selection { background: #E8743C; color: #070604; }
 
 /* Glass scrollbars */
-::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(244,237,223,0.08);
-  border-radius: 4px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  background: rgba(244,237,223,0.10);
+  border-radius: 3px;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(244,237,223,0.14); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(244,237,223,0.18); }
 
-/* === Liquid Glass utility classes === */
+/* ================================================================
+   LIQUID GLASS DESIGN SYSTEM
+   Three tiers of glass with increasing opacity and blur.
+   Every tier has a luminous top edge and inner highlight.
+   ================================================================ */
 @layer components {
 
-  /* Primary glass panel (sidebar, modals) */
+  /* ── Tier 1: Glass (sidebar, major panels) ─────────────────── */
   .glass {
-    background: rgba(30,28,22,0.55);
-    backdrop-filter: blur(24px) saturate(1.4);
-    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    background: linear-gradient(
+      165deg,
+      rgba(244,237,223,0.06) 0%,
+      rgba(30,28,22,0.65) 15%,
+      rgba(20,18,14,0.60) 100%
+    );
+    backdrop-filter: blur(32px) saturate(1.5) brightness(1.05);
+    -webkit-backdrop-filter: blur(32px) saturate(1.5) brightness(1.05);
     border: 1px solid rgba(244,237,223,0.08);
-    box-shadow: 0 0 0 1px rgba(244,237,223,0.04) inset, 0 8px 32px rgba(0,0,0,0.25);
-  }
-
-  /* Lighter glass for cards within glass panels */
-  .glass-card {
-    background: rgba(244,237,223,0.04);
-    backdrop-filter: blur(16px) saturate(1.2);
-    -webkit-backdrop-filter: blur(16px) saturate(1.2);
-    border: 1px solid rgba(244,237,223,0.07);
-    box-shadow: 0 0 0 1px rgba(244,237,223,0.03) inset, 0 2px 8px rgba(0,0,0,0.15);
-  }
-
-  /* Raised glass for modals/overlays */
-  .glass-raised {
-    background: rgba(30,28,22,0.75);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(244,237,223,0.10);
     box-shadow:
-      0 0 0 1px rgba(244,237,223,0.05) inset,
-      0 0 1px 0 rgba(244,237,223,0.1),
-      0 16px 48px rgba(0,0,0,0.4);
+      inset 0 1px 0 0 rgba(244,237,223,0.08),
+      inset 0 0 20px 0 rgba(244,237,223,0.02),
+      0 8px 32px rgba(0,0,0,0.4),
+      0 0 0 1px rgba(0,0,0,0.3);
   }
 
-  /* Inner glass highlight (top edge shimmer) */
+  /* ── Tier 2: Glass Card (content cards, list items) ────────── */
+  .glass-card {
+    background: linear-gradient(
+      165deg,
+      rgba(244,237,223,0.07) 0%,
+      rgba(244,237,223,0.03) 30%,
+      rgba(244,237,223,0.015) 100%
+    );
+    backdrop-filter: blur(20px) saturate(1.3);
+    -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    border: 1px solid rgba(244,237,223,0.08);
+    box-shadow:
+      inset 0 1px 0 0 rgba(244,237,223,0.10),
+      inset 0 0 12px 0 rgba(244,237,223,0.02),
+      0 4px 16px rgba(0,0,0,0.25);
+  }
+  .glass-card:hover {
+    border-color: rgba(244,237,223,0.14);
+    box-shadow:
+      inset 0 1px 0 0 rgba(244,237,223,0.12),
+      inset 0 0 12px 0 rgba(244,237,223,0.03),
+      0 8px 24px rgba(0,0,0,0.3);
+  }
+
+  /* ── Tier 3: Glass Raised (modals, overlays, popovers) ─────── */
+  .glass-raised {
+    background: linear-gradient(
+      165deg,
+      rgba(244,237,223,0.08) 0%,
+      rgba(30,28,22,0.80) 20%,
+      rgba(20,18,14,0.85) 100%
+    );
+    backdrop-filter: blur(48px) saturate(1.8) brightness(1.1);
+    -webkit-backdrop-filter: blur(48px) saturate(1.8) brightness(1.1);
+    border: 1px solid rgba(244,237,223,0.12);
+    box-shadow:
+      inset 0 1px 0 0 rgba(244,237,223,0.15),
+      inset 0 0 30px 0 rgba(244,237,223,0.03),
+      0 0 1px 0 rgba(244,237,223,0.2),
+      0 24px 64px rgba(0,0,0,0.5),
+      0 0 0 1px rgba(0,0,0,0.4);
+  }
+
+  /* ── Glass inner item (rows inside glass cards) ────────────── */
+  .glass-inner {
+    background: rgba(244,237,223,0.025);
+    border: 1px solid rgba(244,237,223,0.06);
+    transition: all 0.15s ease;
+  }
+  .glass-inner:hover {
+    background: rgba(244,237,223,0.05);
+    border-color: rgba(232,116,60,0.3);
+    box-shadow: 0 0 12px rgba(232,116,60,0.06);
+  }
+
+  /* ── Top shimmer highlight ─────────────────────────────────── */
   .glass-shimmer {
     position: relative;
   }
   .glass-shimmer::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: 10%;
-    right: 10%;
+    top: 0; left: 8%; right: 8%;
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(244,237,223,0.15), transparent);
-    border-radius: 1px;
+    background: linear-gradient(90deg, transparent, rgba(244,237,223,0.25), transparent);
     pointer-events: none;
+    z-index: 1;
   }
 
-  /* Ember glow for primary buttons */
+  /* ── Primary button with ember glow ────────────────────────── */
   .btn-glass {
-    background: linear-gradient(135deg, #E8743C, #C75A29);
-    color: #0E0D0A;
+    background: linear-gradient(135deg, #E8743C 0%, #C75A29 100%);
+    color: #070604;
     font-weight: 600;
-    border: 1px solid rgba(232,116,60,0.3);
-    box-shadow: 0 0 20px rgba(232,116,60,0.2), 0 2px 8px rgba(0,0,0,0.3);
+    border: 1px solid rgba(232,116,60,0.4);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255,255,255,0.2),
+      0 0 24px rgba(232,116,60,0.25),
+      0 4px 12px rgba(0,0,0,0.3);
     transition: all 0.2s ease;
   }
   .btn-glass:hover {
-    box-shadow: 0 0 30px rgba(232,116,60,0.3), 0 4px 16px rgba(0,0,0,0.3);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255,255,255,0.25),
+      0 0 36px rgba(232,116,60,0.35),
+      0 6px 20px rgba(0,0,0,0.3);
     transform: translateY(-1px);
   }
+  .btn-glass:active {
+    transform: translateY(0);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255,255,255,0.1),
+      0 0 16px rgba(232,116,60,0.2),
+      0 2px 6px rgba(0,0,0,0.3);
+  }
 
-  /* Ghost button (glass border) */
+  /* ── Ghost button ──────────────────────────────────────────── */
   .btn-ghost {
     background: rgba(244,237,223,0.04);
     border: 1px solid rgba(244,237,223,0.10);
     color: #948A7A;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+    box-shadow: inset 0 1px 0 0 rgba(244,237,223,0.04);
     transition: all 0.2s ease;
   }
   .btn-ghost:hover {
     background: rgba(244,237,223,0.08);
     color: #F4EDDF;
-    border-color: rgba(244,237,223,0.15);
+    border-color: rgba(244,237,223,0.18);
+    box-shadow: inset 0 1px 0 0 rgba(244,237,223,0.06), 0 0 8px rgba(244,237,223,0.04);
+  }
+
+  /* ── Glass input fields ────────────────────────────────────── */
+  .input-glass {
+    background: rgba(7,6,4,0.5);
+    border: 1px solid rgba(244,237,223,0.08);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+    transition: all 0.15s ease;
+  }
+  .input-glass:focus {
+    border-color: rgba(232,116,60,0.5);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.2), 0 0 12px rgba(232,116,60,0.1);
+    outline: none;
+  }
+
+  /* ── Company badge (prominent association indicator) ────────── */
+  .badge-company {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: linear-gradient(135deg, rgba(232,116,60,0.15), rgba(232,116,60,0.05));
+    border: 1px solid rgba(232,116,60,0.25);
+    border-radius: 8px;
+    color: #E8743C;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .badge-company:hover {
+    background: linear-gradient(135deg, rgba(232,116,60,0.25), rgba(232,116,60,0.10));
+    border-color: rgba(232,116,60,0.4);
+    box-shadow: 0 0 16px rgba(232,116,60,0.15);
+  }
+
+  /* ── Status badge with glass ───────────────────────────────── */
+  .badge-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
   }
 }
 
@@ -117,7 +228,7 @@ body {
 .prose-tight h1 { font-size: 1.2em; }
 .prose-tight h2 { font-size: 1.1em; }
 .prose-tight h3 { font-size: 1.05em; }
-.prose-tight code { background: rgba(23,21,15,0.7); padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
-.prose-tight pre { background: rgba(23,21,15,0.7); padding: 10px; border-radius: 6px; overflow-x: auto; }
+.prose-tight code { background: rgba(7,6,4,0.7); padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
+.prose-tight pre { background: rgba(7,6,4,0.7); padding: 10px; border-radius: 6px; overflow-x: auto; }
 .prose-tight ul, .prose-tight ol { margin: 0.3em 0; padding-left: 1.5em; }
 .prose-tight a { color: #E8743C; text-decoration: underline; }

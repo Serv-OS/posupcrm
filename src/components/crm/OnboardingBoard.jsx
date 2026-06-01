@@ -89,7 +89,7 @@ export default function OnboardingBoard({ profile, onSelectOnboarding, onNavigat
                     draggable={canWrite}
                     onDragStart={e => onDragStart(e, o)}
                     onClick={() => onSelectOnboarding(o.id)}
-                    className="bg-ink-soft border border-bdr rounded-lg p-2.5 cursor-pointer hover:border-dim transition">
+                    className="glass-inner rounded-xl p-2.5 cursor-pointer">
                     <div className="text-xs text-paper font-medium">{companyName(o.company_id)}</div>
                     {o.owner_id && <div className="text-[10px] text-dim mt-1">{ownerName(o.owner_id)}</div>}
                   </div>

@@ -540,7 +540,7 @@ function Card({ item, members, features, onClick, onDragStart, draggable }) {
   const feature = features.find(f => f.id === item.feature_id);
   return (
     <div draggable={draggable} onDragStart={onDragStart} onClick={onClick}
-      className="bg-ink-soft border border-bdr rounded-lg p-3 cursor-pointer hover:border-dim transition">
+      className="glass-inner rounded-xl p-3 cursor-pointer">
       <div className="flex items-start gap-2 mb-2">
         <span className="text-sm">{TYPE_ICON[item.type] || TYPE_ICON.task}</span>
         <div className="text-sm text-paper flex-1 min-w-0 leading-snug">{item.title}</div>
