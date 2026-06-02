@@ -1,0 +1,307 @@
+// Gmail Check - Polls Gmail for new support emails and creates/threads tickets
+// Triggered by pg_cron or manual call every 30-60 seconds
+//
+// Required Supabase Secrets:
+//   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN
+//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+async function getAccessToken(): Promise<string> {
+  const clientId = Deno.env.get("GMAIL_CLIENT_ID")!;
+  const clientSecret = Deno.env.get("GMAIL_CLIENT_SECRET")!;
+  const refreshToken = Deno.env.get("GMAIL_REFRESH_TOKEN")!;
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  const data = await res.json();
+  if (!data.access_token) throw new Error("Failed to get Gmail access token: " + JSON.stringify(data));
+  return data.access_token;
+}
+
+async function getGmailMessages(accessToken: string, after?: string) {
+  // Fetch messages from inbox after a certain date
+  let query = "in:inbox is:unread";
+  if (after) query += ` after:${after}`;
+
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=20`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const data = await res.json();
+  return data.messages || [];
+}
+
+async function getGmailMessage(accessToken: string, messageId: string) {
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  return await res.json();
+}
+
+async function markAsRead(accessToken: string, messageId: string) {
+  await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ removeLabelIds: ["UNREAD"] }),
+    }
+  );
+}
+
+function getHeader(headers: any[], name: string): string {
+  const h = headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase());
+  return h?.value || "";
+}
+
+function extractEmail(str: string): string {
+  const match = str.match(/<([^>]+)>/) || str.match(/([^\s<>]+@[^\s<>]+)/);
+  return match ? match[1].toLowerCase() : str.toLowerCase().trim();
+}
+
+function extractName(str: string): string {
+  const match = str.match(/^"?([^"<]+)"?\s*</);
+  return match ? match[1].trim() : "";
+}
+
+function decodeBody(part: any): string {
+  if (part.body?.data) {
+    // Base64url decode
+    const decoded = atob(part.body.data.replace(/-/g, "+").replace(/_/g, "/"));
+    return decoded;
+  }
+  if (part.parts) {
+    // Prefer text/plain, fall back to text/html
+    const textPart = part.parts.find((p: any) => p.mimeType === "text/plain");
+    if (textPart) return decodeBody(textPart);
+    const htmlPart = part.parts.find((p: any) => p.mimeType === "text/html");
+    if (htmlPart) {
+      const html = decodeBody(htmlPart);
+      // Strip HTML tags for plain text
+      return html.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+    }
+    // Recurse into first part
+    return decodeBody(part.parts[0]);
+  }
+  return "";
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    const accessToken = await getAccessToken();
+
+    // Get unread messages
+    const messages = await getGmailMessages(accessToken);
+    let processed = 0;
+
+    for (const msg of messages) {
+      const full = await getGmailMessage(accessToken, msg.id);
+      const headers = full.payload?.headers || [];
+
+      const from = getHeader(headers, "From");
+      const subject = getHeader(headers, "Subject");
+      const messageId = getHeader(headers, "Message-ID");
+      const inReplyTo = getHeader(headers, "In-Reply-To");
+      const references = getHeader(headers, "References");
+      const gmailThreadId = full.threadId;
+      const date = getHeader(headers, "Date");
+
+      const senderEmail = extractEmail(from);
+      const senderName = extractName(from);
+
+      // Skip emails from ourselves (support@serv-os.app)
+      if (senderEmail.includes("support@serv-os") || senderEmail.includes("support@servos")) {
+        await markAsRead(accessToken, msg.id);
+        continue;
+      }
+
+      // Check if we already processed this message
+      const { data: existing } = await supabase
+        .from("crm_activities")
+        .select("id")
+        .eq("message_id", messageId)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        await markAsRead(accessToken, msg.id);
+        continue;
+      }
+
+      // Try to find existing ticket by Gmail thread ID
+      let ticketId: string | null = null;
+      const { data: threadMatch } = await supabase
+        .from("ticket_email_threads")
+        .select("ticket_id")
+        .eq("email_thread_id", gmailThreadId)
+        .limit(1);
+
+      if (threadMatch && threadMatch.length > 0) {
+        ticketId = threadMatch[0].ticket_id;
+
+        // Reopen ticket if it was resolved/closed
+        const { data: ticket } = await supabase
+          .from("tickets")
+          .select("stage")
+          .eq("id", ticketId)
+          .single();
+
+        if (ticket && ["resolved", "closed"].includes(ticket.stage)) {
+          await supabase
+            .from("tickets")
+            .update({ stage: "in_progress" })
+            .eq("id", ticketId);
+
+          await supabase.from("stage_history").insert({
+            object_type: "ticket",
+            object_id: ticketId,
+            from_stage: ticket.stage,
+            to_stage: "in_progress",
+          });
+        }
+      }
+
+      // Try to match sender to a contact
+      let contactId: string | null = null;
+      let companyId: string | null = null;
+
+      const { data: contacts } = await supabase
+        .from("contacts")
+        .select("id, first_name, last_name, email")
+        .ilike("email", senderEmail)
+        .limit(1);
+
+      if (contacts && contacts.length > 0) {
+        contactId = contacts[0].id;
+
+        // Find company via associations
+        const { data: assocs } = await supabase
+          .from("associations")
+          .select("to_id")
+          .eq("from_type", "contact")
+          .eq("from_id", contactId)
+          .eq("to_type", "company")
+          .limit(1);
+
+        if (assocs && assocs.length > 0) {
+          companyId = assocs[0].to_id;
+        }
+      }
+
+      // Create ticket if no thread match
+      if (!ticketId) {
+        const { data: newTicket } = await supabase
+          .from("tickets")
+          .insert({
+            subject: subject || "Email from " + senderEmail,
+            description: null,
+            company_id: companyId || undefined,
+            channel: "email",
+            customer_email: senderEmail,
+            contact_id: contactId,
+            source: "email",
+          })
+          .select()
+          .single();
+
+        if (newTicket) {
+          ticketId = newTicket.id;
+
+          // Write stage history
+          await supabase.from("stage_history").insert({
+            object_type: "ticket",
+            object_id: ticketId,
+            from_stage: null,
+            to_stage: "new",
+          });
+
+          // Link contact to ticket
+          if (contactId) {
+            await supabase.from("associations").insert({
+              from_type: "ticket",
+              from_id: ticketId,
+              to_type: "contact",
+              to_id: contactId,
+              label: "primary_contact",
+            });
+          }
+
+          // Store thread mapping
+          await supabase.from("ticket_email_threads").insert({
+            ticket_id: ticketId,
+            email_thread_id: gmailThreadId,
+          });
+        }
+      }
+
+      // Create activity
+      if (ticketId) {
+        const body = decodeBody(full.payload);
+
+        await supabase.from("crm_activities").insert({
+          type: "email",
+          subject: subject,
+          body: body.slice(0, 10000), // Limit body length
+          subject_type: "ticket",
+          subject_id: ticketId,
+          direction: "inbound",
+          contact_id: contactId,
+          message_id: messageId,
+          in_reply_to: inReplyTo || null,
+          thread_id: gmailThreadId,
+          is_internal: false,
+          channel_metadata: {
+            from: from,
+            gmail_message_id: msg.id,
+            gmail_thread_id: gmailThreadId,
+          },
+          occurred_at: date ? new Date(date).toISOString() : new Date().toISOString(),
+        });
+
+        processed++;
+      }
+
+      // Mark as read in Gmail
+      await markAsRead(accessToken, msg.id);
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, processed, total: messages.length }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Gmail check error:", error);
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});

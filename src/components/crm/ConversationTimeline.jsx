@@ -120,11 +120,52 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
   const save = async () => {
     if (channel === 'note' && !body.trim()) return;
     if (channel === 'call' && !body.trim()) return;
+    if (channel === 'email' && (!body.trim() || !toEmail.trim())) return;
+    if (channel === 'sms' && (!body.trim() || !toPhone.trim())) return;
     setSending(true);
 
+    // Email: send via Gmail edge function
+    if (channel === 'email' && subjectType === 'ticket') {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gmail-send`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session?.access_token}`,
+            },
+            body: JSON.stringify({
+              ticket_id: subjectId,
+              to: toEmail.trim(),
+              subject: subject.trim() || null,
+              body: body.trim(),
+            }),
+          }
+        );
+        const result = await res.json();
+        if (!res.ok) {
+          alert('Email send failed: ' + (result.error || 'Unknown error'));
+          setSending(false);
+          return;
+        }
+        // Success - activity was created by the edge function
+        setBody(''); setSubject(''); setToEmail('');
+        setSending(false);
+        load();
+        return;
+      } catch (err) {
+        alert('Email send failed: ' + err.message);
+        setSending(false);
+        return;
+      }
+    }
+
+    // For notes, SMS, calls: create activity directly
     const record = {
       type: channel,
-      subject: channel === 'email' ? subject.trim() || null : null,
+      subject: null,
       body: body.trim() || null,
       subject_type: subjectType,
       subject_id: subjectId,
@@ -134,9 +175,7 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
       channel_metadata: {},
     };
 
-    if (channel === 'email') {
-      record.channel_metadata = { to: toEmail, from: profile.email };
-    } else if (channel === 'sms') {
+    if (channel === 'sms') {
       record.channel_metadata = { to_number: toPhone, from_number: 'system' };
     } else if (channel === 'call') {
       const durationParts = callDuration.split(':').map(Number);
