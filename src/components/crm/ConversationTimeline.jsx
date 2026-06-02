@@ -19,8 +19,8 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
   const [channel, setChannel] = useState(ticketChannel || 'note');
   const [body, setBody] = useState('');
   const [subject, setSubject] = useState('');
-  const [toEmail, setToEmail] = useState('');
-  const [toPhone, setToPhone] = useState('');
+  const [toEmail, setToEmail] = useState(ticket?.customer_email || '');
+  const [toPhone, setToPhone] = useState(ticket?.customer_phone || '');
   const [direction, setDirection] = useState('outbound');
   const [callDuration, setCallDuration] = useState('');
   const [callOutcome, setCallOutcome] = useState('connected');

@@ -102,19 +102,25 @@ serve(async (req) => {
 
     // Create new ticket if no open one exists
     if (!ticketId) {
-      const { data: newTicket } = await supabase
+      const ticketData: any = {
+        subject: `SMS from ${contactName}`,
+        description: body.slice(0, 200),
+        channel: "sms",
+        customer_phone: normalizedFrom,
+        contact_id: contactId,
+        source: "sms",
+      };
+      if (companyId) ticketData.company_id = companyId;
+
+      const { data: newTicket, error: ticketError } = await supabase
         .from("tickets")
-        .insert({
-          subject: `SMS from ${contactName}`,
-          description: body.slice(0, 200),
-          company_id: companyId || undefined,
-          channel: "sms",
-          customer_phone: normalizedFrom,
-          contact_id: contactId,
-          source: "sms",
-        })
+        .insert(ticketData)
         .select()
         .single();
+
+      if (ticketError) {
+        console.error("Ticket create error:", ticketError);
+      }
 
       if (newTicket) {
         ticketId = newTicket.id;
