@@ -24,6 +24,7 @@ export default function ProjectDetail({ projectId, profile, onClose, onSelectTas
   const [companies, setCompanies] = useState([]);
   const [locations, setLocations] = useState([]);
   const [deals, setDeals] = useState([]);
+  const [onboardings, setOnboardings] = useState([]);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [newTask, setNewTask] = useState('');
@@ -35,17 +36,19 @@ export default function ProjectDetail({ projectId, profile, onClose, onSelectTas
   useEffect(() => { load(); }, [projectId]);
 
   const load = async () => {
-    const [p, t, m, c, l, d] = await Promise.all([
+    const [p, t, m, c, l, d, ob] = await Promise.all([
       supabase.from('crm_projects').select('*').eq('id', projectId).single(),
       supabase.from('tasks').select('*').eq('project_id', projectId).is('parent_task_id', null).order('sort_order'),
       supabase.from('profiles').select('id, email, display_name'),
       supabase.from('companies').select('id, name'),
       supabase.from('locations').select('id, name, company_id'),
       supabase.from('deals').select('id, name, company_id'),
+      supabase.from('onboardings').select('id, company_id, stage'),
     ]);
     setProject(p.data);
     setTasks(t.data || []);
     setMembers(m.data || []);
+    setOnboardings(ob.data || []);
     setCompanies(c.data || []);
     setLocations(l.data || []);
     setDeals(d.data || []);
@@ -237,38 +240,79 @@ export default function ProjectDetail({ projectId, profile, onClose, onSelectTas
                   </select>
                 </div>
                 <div><label className={label}>Due date</label><input className={input} type="date" value={draft.due_date || ''} onChange={e => set('due_date', e.target.value || null)} /></div>
+              </div>
+
+              <div className={label + ' mt-3 mb-1'}>Link to</div>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={label}>Location</label>
                   <select className={input} value={draft.subject_type === 'location' ? (draft.subject_id || '') : ''} onChange={e => {
-                    if (e.target.value) {
-                      set('subject_type', 'location');
-                      set('subject_id', e.target.value);
-                    } else {
-                      set('subject_type', null);
-                      set('subject_id', null);
-                    }
+                    setDraft(prev => ({
+                      ...prev,
+                      subject_type: e.target.value ? 'location' : null,
+                      subject_id: e.target.value || null,
+                    }));
                   }}>
-                    <option value="">No location</option>
+                    <option value="">None</option>
                     {locations.map(l => {
                       const co = companies.find(c => c.id === l.company_id);
                       return <option key={l.id} value={l.id}>{l.name} ({co?.name || '?'})</option>;
                     })}
                   </select>
                 </div>
-                {/* Auto-derived company */}
-                {draft.subject_type === 'location' && draft.subject_id && (() => {
-                  const loc = locations.find(l => l.id === draft.subject_id);
-                  const coName = loc ? companies.find(c => c.id === loc.company_id)?.name : '';
-                  return coName ? (
-                    <div>
-                      <label className={label}>Company (auto)</label>
-                      <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm text-slate-600 flex items-center gap-2">
-                        {'\u{1F3E2}'} {coName}
-                      </div>
-                    </div>
-                  ) : null;
-                })()}
+                <div>
+                  <label className={label}>Company</label>
+                  <select className={input} value={draft.subject_type === 'company' ? (draft.subject_id || '') : ''} onChange={e => {
+                    setDraft(prev => ({
+                      ...prev,
+                      subject_type: e.target.value ? 'company' : null,
+                      subject_id: e.target.value || null,
+                    }));
+                  }}>
+                    <option value="">None</option>
+                    {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={label}>Deal</label>
+                  <select className={input} value={draft.subject_type === 'deal' ? (draft.subject_id || '') : ''} onChange={e => {
+                    setDraft(prev => ({
+                      ...prev,
+                      subject_type: e.target.value ? 'deal' : null,
+                      subject_id: e.target.value || null,
+                    }));
+                  }}>
+                    <option value="">None</option>
+                    {deals.map(d => {
+                      const co = companies.find(c => c.id === d.company_id);
+                      return <option key={d.id} value={d.id}>{d.name} ({co?.name || '?'})</option>;
+                    })}
+                  </select>
+                </div>
+                <div>
+                  <label className={label}>Onboarding</label>
+                  <select className={input} value={draft.subject_type === 'onboarding' ? (draft.subject_id || '') : ''} onChange={e => {
+                    setDraft(prev => ({
+                      ...prev,
+                      subject_type: e.target.value ? 'onboarding' : null,
+                      subject_id: e.target.value || null,
+                    }));
+                  }}>
+                    <option value="">None</option>
+                    {onboardings.map(o => {
+                      const co = companies.find(c => c.id === o.company_id);
+                      return <option key={o.id} value={o.id}>{co?.name || '?'} Onboarding</option>;
+                    })}
+                  </select>
+                </div>
               </div>
+              {/* Show which link is active */}
+              {draft.subject_type && draft.subject_id && (
+                <div className="mt-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700 flex items-center gap-2">
+                  Linked to: {draft.subject_type === 'location' ? '\u{1F4CD}' : draft.subject_type === 'deal' ? '\u{1F4B0}' : draft.subject_type === 'onboarding' ? '\u{1F680}' : '\u{1F3E2}'}
+                  {' '}{draft.subject_type}
+                </div>
+              )}
               <div className="flex gap-2 pt-1">
                 <button onClick={save} className="px-4 py-2 bg-ember text-ink text-sm font-semibold rounded">Save</button>
                 <button onClick={() => setEditing(false)} className="px-4 py-2 text-sm text-muted border border-bdr rounded">Cancel</button>
