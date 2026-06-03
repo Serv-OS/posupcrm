@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import AssociationManager from './AssociationManager.jsx';
 import ActivityTimeline from './ActivityTimeline.jsx';
+import CallButton from '../CallButton.jsx';
 
 const STATUS_OPTIONS = ['prospect', 'onboarding', 'live', 'churned'];
 const STATUS_COLORS = {
@@ -108,6 +109,9 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
             {location.covers && <span className="text-xs text-muted">{location.covers} covers</span>}
           </div>
         </div>
+        {!editing && location.phone && (
+          <CallButton number={location.phone} className="px-3 py-2 text-sm" />
+        )}
         {canWrite && !editing && (
           <div className="flex gap-2">
             <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>

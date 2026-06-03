@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import AssociationManager from './AssociationManager.jsx';
 import ConversationTimeline from './ConversationTimeline.jsx';
+import CallButton from '../CallButton.jsx';
 
 const STAGES = ['new','in_progress','waiting_on_customer','escalated','resolved','closed'];
 const STAGE_LABELS = { new:'New', in_progress:'In Progress', waiting_on_customer:'Waiting on Customer', escalated:'Escalated', resolved:'Resolved', closed:'Closed' };
@@ -287,7 +288,8 @@ export default function TicketDetail({ ticketId, profile, onClose, onNavigate })
                     {ticket.customer_phone && (
                       <div className="flex items-center gap-2 text-sm">
                         <span className="text-base">{'\u{1F4F1}'}</span>
-                        <span className="text-paper font-mono">{ticket.customer_phone}</span>
+                        <span className="text-paper font-mono flex-1">{ticket.customer_phone}</span>
+                        <CallButton number={ticket.customer_phone} />
                       </div>
                     )}
                     {ticket.customer_email && (

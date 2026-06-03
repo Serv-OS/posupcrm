@@ -13,6 +13,7 @@ export default function PhoneBar({ profile }) {
   const [showDialer, setShowDialer] = useState(false);
   const timerRef = useRef(null);
   const deviceRef = useRef(null);
+  const pendingCallRef = useRef(null);
 
   // Go online: get token and connect Twilio Device
   const goOnline = async () => {
@@ -39,6 +40,12 @@ export default function PhoneBar({ profile }) {
 
       newDevice.on('registered', () => {
         setStatus('online');
+        // If a call was requested while offline, place it now that we're connected
+        if (pendingCallRef.current) {
+          const num = pendingCallRef.current;
+          pendingCallRef.current = null;
+          setTimeout(() => makeCall(num), 400);
+        }
       });
 
       newDevice.on('incoming', (call) => {
@@ -129,7 +136,7 @@ export default function PhoneBar({ profile }) {
 
   // Make outbound call
   const makeCall = async (number) => {
-    if (!deviceRef.current || status !== 'online') return;
+    if (!deviceRef.current) { alert('Phone not connected. Click "Go Online" first.'); return; }
     try {
       const call = await deviceRef.current.connect({
         params: { To: number },
@@ -184,6 +191,30 @@ export default function PhoneBar({ profile }) {
       return () => clearInterval(interval);
     }
   }, [status, profile.id]);
+
+  // Global click-to-call: listen for 'servos:call' events fired from anywhere in the app
+  useEffect(() => {
+    const handler = (e) => {
+      const number = e.detail?.number;
+      if (!number) return;
+      if (status === 'on-call' || status === 'ringing' || activeCall) {
+        alert('You are already on a call.');
+        return;
+      }
+      if (deviceRef.current && status === 'online') {
+        makeCall(number);
+      } else if (status === 'connecting') {
+        // Already connecting — queue the number to dial once registered
+        pendingCallRef.current = number;
+      } else {
+        // Offline: connect first, then auto-dial in the 'registered' handler
+        pendingCallRef.current = number;
+        goOnline();
+      }
+    };
+    window.addEventListener('servos:call', handler);
+    return () => window.removeEventListener('servos:call', handler);
+  }, [status, activeCall]);
 
   // Cleanup on unmount
   useEffect(() => {

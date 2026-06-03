@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import AssociationManager from './AssociationManager.jsx';
 import ActivityTimeline from './ActivityTimeline.jsx';
+import CallButton from '../CallButton.jsx';
 
 export default function ContactDetail({ contactId, profile, onClose, onNavigate }) {
   const [contact, setContact] = useState(null);
@@ -60,6 +61,9 @@ export default function ContactDetail({ contactId, profile, onClose, onNavigate 
             {contact.phone && <span> / {contact.phone}</span>}
           </div>
         </div>
+        {!editing && contact.phone && (
+          <CallButton number={contact.phone} className="px-3 py-2 text-sm" />
+        )}
         {canWrite && !editing && (
           <div className="flex gap-2">
             <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>

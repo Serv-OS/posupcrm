@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import AssociationManager from './AssociationManager.jsx';
 import ActivityTimeline from './ActivityTimeline.jsx';
+import CallButton from '../CallButton.jsx';
 
 const STATUS_COLORS = {
   prospect: 'bg-blue-100 text-blue-700 border border-blue-200',
@@ -101,6 +102,9 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate 
             {' / '}Owner: {ownerName(company.owner_id)}
           </div>
         </div>
+        {!editing && company.phone && (
+          <CallButton number={company.phone} className="px-3 py-2 text-sm" />
+        )}
         {canWrite && !editing && (
           <div className="flex gap-2">
             <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>
