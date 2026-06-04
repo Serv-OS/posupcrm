@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { TEAM_OPTIONS, TEAM_LABELS } from '../UsersPanel.jsx';
+import { fmtMinutes } from '../../lib/sla';
 
 const GMAIL_CLIENT_ID = '836252293153-ekl6o41r2kra549aqnjr9bvpiq2t4nfg.apps.googleusercontent.com';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -12,6 +13,7 @@ export default function SettingsPanel({ profile }) {
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState(null);
   const [agentCounts, setAgentCounts] = useState({});
+  const [slaPolicies, setSlaPolicies] = useState([]);
 
   const isOwner = profile.role === 'owner';
 
@@ -33,13 +35,15 @@ export default function SettingsPanel({ profile }) {
 
   const load = async () => {
     setLoading(true);
-    const [gc, ss, profs] = await Promise.all([
+    const [gc, ss, profs, sla] = await Promise.all([
       supabase.from('gmail_connections').select('*').order('created_at', { ascending: false }),
       supabase.from('support_settings').select('*').eq('id', 1).maybeSingle(),
       supabase.from('profiles').select('teams'),
+      supabase.from('sla_policies').select('*').order('priority'),
     ]);
     setConnections(gc.data || []);
     setSettings(ss.data || { auto_assign_enabled: true, assign_team: 'support', prefer_online: true });
+    setSlaPolicies(sla.data || []);
     // Count members per team for the helper text
     const counts = {};
     (profs.data || []).forEach(p => (p.teams || []).forEach(t => { counts[t] = (counts[t] || 0) + 1; }));
@@ -57,6 +61,13 @@ export default function SettingsPanel({ profile }) {
       prefer_online: next.prefer_online,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'id' });
+  };
+
+  const saveSla = async (priority, field, value) => {
+    const v = parseInt(value);
+    if (isNaN(v) || v < 0) return;
+    setSlaPolicies(prev => prev.map(p => p.priority === priority ? { ...p, [field]: v } : p));
+    await supabase.from('sla_policies').update({ [field]: v, updated_at: new Date().toISOString() }).eq('priority', priority);
   };
 
   const connectGmail = async () => {
@@ -158,6 +169,32 @@ export default function SettingsPanel({ profile }) {
                   </div>
                 </div>
                 {!isOwner && <div className="text-[11px] text-dim">Only owners can change these settings.</div>}
+              </div>
+            </div>
+          )}
+
+          {/* SLA policies */}
+          {slaPolicies.length > 0 && (
+            <div className="glass-card rounded-2xl overflow-hidden">
+              <div className="px-5 py-4 border-b border-bdr flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-lg">{'\u{23F1}'}</div>
+                <div className="flex-1">
+                  <div className="text-base font-bold text-paper">SLA targets</div>
+                  <div className="text-xs text-muted">First-response and resolution time goals by priority</div>
+                </div>
+              </div>
+              <div className="p-5">
+                <div className="grid grid-cols-[auto_1fr_1fr] gap-x-4 gap-y-2 items-center">
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">Priority</div>
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">First response (min)</div>
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">Resolution (min)</div>
+                  {slaPolicies.map(p => (
+                    <FragmentRow key={p.priority} p={p} isOwner={isOwner} saveSla={saveSla} />
+                  ))}
+                </div>
+                <div className="text-[11px] text-dim mt-3 pt-3 border-t border-bdr leading-relaxed">
+                  Targets are measured from when the ticket is created (wall-clock). A ticket breaches if no reply is logged, or it isn't resolved, before its due time.
+                </div>
               </div>
             </div>
           )}
@@ -289,5 +326,27 @@ export default function SettingsPanel({ profile }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function FragmentRow({ p, isOwner, saveSla }) {
+  const hint = (m) => fmtMinutes(m);
+  const cell = "w-full px-2 py-1.5 bg-card border border-bdr rounded-lg text-sm text-paper focus:outline-none focus:border-ember";
+  return (
+    <>
+      <div className="text-sm font-bold text-paper">{p.priority}</div>
+      <div className="flex items-center gap-2">
+        <input type="number" min="0" disabled={!isOwner} defaultValue={p.first_response_minutes}
+          onBlur={e => saveSla(p.priority, 'first_response_minutes', e.target.value)}
+          className={cell} />
+        <span className="text-[10px] text-dim w-10 shrink-0">{hint(p.first_response_minutes)}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <input type="number" min="0" disabled={!isOwner} defaultValue={p.resolution_minutes}
+          onBlur={e => saveSla(p.priority, 'resolution_minutes', e.target.value)}
+          className={cell} />
+        <span className="text-[10px] text-dim w-10 shrink-0">{hint(p.resolution_minutes)}</span>
+      </div>
+    </>
   );
 }

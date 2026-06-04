@@ -3,6 +3,8 @@ import { supabase } from '../../lib/supabase';
 import AssociationManager from './AssociationManager.jsx';
 import ConversationTimeline from './ConversationTimeline.jsx';
 import CallButton from '../CallButton.jsx';
+import SlaBadge from './SlaBadge.jsx';
+import { computeSla, fmtMinutes } from '../../lib/sla';
 
 const STAGES = ['new','in_progress','waiting_on_customer','escalated','resolved','closed'];
 const STAGE_LABELS = { new:'New', in_progress:'In Progress', waiting_on_customer:'Waiting on Customer', escalated:'Escalated', resolved:'Resolved', closed:'Closed' };
@@ -201,6 +203,7 @@ export default function TicketDetail({ ticketId, profile, onClose, onNavigate })
           </div>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <span className={`badge-status ${STAGE_STYLES[ticket.stage]}`}>{STAGE_LABELS[ticket.stage]}</span>
+            <SlaBadge ticket={ticket} />
             <span className="text-xs text-dim font-mono">{ticket.priority}</span>
             <span className="text-xs text-muted">{ticket.ticket_type}</span>
             {company && (
@@ -349,6 +352,34 @@ export default function TicketDetail({ ticketId, profile, onClose, onNavigate })
                   {ticket.description && <Field label="Description" value={ticket.description} />}
                   {ticket.notes && <Field label="Notes" value={ticket.notes} />}
                 </div>
+              </Card>
+
+              <Card title="SLA">
+                {(() => {
+                  const sla = computeSla(ticket);
+                  const fmt = (ts) => ts ? new Date(ts).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '--';
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-paper font-medium">Status</span>
+                        <SlaBadge ticket={ticket} />
+                      </div>
+                      <div className="space-y-1 pt-1 border-t border-bdr">
+                        <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-0.5">First response</div>
+                        <div className="flex justify-between text-xs"><span className="text-muted">Due</span><span className="text-paper">{fmt(ticket.response_due_at)}</span></div>
+                        <div className="flex justify-between text-xs"><span className="text-muted">Responded</span>
+                          <span className={ticket.first_response_at ? 'text-paper' : 'text-amber-600'}>{ticket.first_response_at ? fmt(ticket.first_response_at) : 'Awaiting reply'}</span></div>
+                      </div>
+                      <div className="space-y-1 pt-2 border-t border-bdr">
+                        <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-0.5">Resolution</div>
+                        <div className="flex justify-between text-xs"><span className="text-muted">Due</span><span className="text-paper">{fmt(ticket.resolution_due_at)}</span></div>
+                        <div className="flex justify-between text-xs"><span className="text-muted">Resolved</span>
+                          <span className="text-paper">{ticket.resolved_at ? fmt(ticket.resolved_at) : ticket.closed_at ? fmt(ticket.closed_at) : '--'}</span></div>
+                      </div>
+                      {sla.detail && <div className="text-[11px] text-dim pt-1">{sla.detail}</div>}
+                    </div>
+                  );
+                })()}
               </Card>
 
               <Card title="Company">

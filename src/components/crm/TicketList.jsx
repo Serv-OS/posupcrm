@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
+import SlaBadge from './SlaBadge.jsx';
 
 const STAGE_STYLES = {
   new: 'bg-blue-100 text-blue-700 border border-blue-200',
@@ -187,12 +188,13 @@ export default function TicketList({ profile, onSelect, onNavigate }) {
               <th className="px-3 py-2.5 text-center">Priority</th>
               <th className="px-3 py-2.5 text-left">Type</th>
               <th className="px-3 py-2.5 text-left">Stage</th>
+              <th className="px-3 py-2.5 text-left">SLA</th>
               <th className="px-3 py-2.5 text-left">Owner</th>
               <th className="px-3 py-2.5 text-left">Created</th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={8} className="px-6 py-8 text-center text-dim text-sm">Loading...</td></tr>}
+            {loading && <tr><td colSpan={9} className="px-6 py-8 text-center text-dim text-sm">Loading...</td></tr>}
             {!loading && filtered.map(t => (
               <tr key={t.id} onClick={() => onSelect(t.id)} className="border-b border-bdr hover:bg-card/50 cursor-pointer transition">
                 <td className="px-6 py-3 text-xs font-mono font-bold text-ember">{t.ticket_number ? `#${t.ticket_number}` : '--'}</td>
@@ -205,12 +207,13 @@ export default function TicketList({ profile, onSelect, onNavigate }) {
                     {STAGE_LABELS[t.stage] || t.stage}
                   </span>
                 </td>
+                <td className="px-3 py-3"><SlaBadge ticket={t} /></td>
                 <td className="px-3 py-3 text-xs text-muted">{ownerName(t.owner_id)}</td>
                 <td className="px-3 py-3 text-xs text-dim">{new Date(t.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'short' })}</td>
               </tr>
             ))}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={8} className="px-6 py-8 text-center text-dim text-sm">No tickets.</td></tr>
+              <tr><td colSpan={9} className="px-6 py-8 text-center text-dim text-sm">No tickets.</td></tr>
             )}
           </tbody>
         </table>
