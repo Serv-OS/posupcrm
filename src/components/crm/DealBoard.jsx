@@ -150,6 +150,7 @@ export default function DealBoard({ profile, onSelectDeal, onNavigate }) {
   const formatCurrency = (v) => v ? `£${v.toLocaleString('en-GB', { minimumFractionDigits: 0 })}` : '';
 
   const input = "w-full px-3 py-2 bg-card border border-bdr rounded text-sm text-paper placeholder-dim focus:outline-none focus:border-ember";
+  const fld = "px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember";
 
   const pipelineTotal = deals.filter(d => !['closed_won','closed_lost'].includes(d.stage)).reduce((s, d) => s + (d.value || 0), 0);
   const wonTotal = deals.filter(d => d.stage === 'closed_won').reduce((s, d) => s + (d.value || 0), 0);
@@ -181,34 +182,30 @@ export default function DealBoard({ profile, onSelectDeal, onNavigate }) {
 
       {showCreate && (
         <div className="px-6 py-3 border-b border-bdr">
-          <form onSubmit={create} className="space-y-2">
-            <div className="flex gap-2">
-              <input className={input + ' flex-1'} value={newName} onChange={e => setNewName(e.target.value)} placeholder="Deal name" autoFocus />
-              <input className={input + ' w-32'} value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="Value (GBP)" type="number" step="0.01" />
-            </div>
-            <div className="flex gap-2 items-center">
-              <select className={input + ' w-56'} value={newLocation} onChange={e => handleLocationChange(e.target.value)}>
-                <option value="">Select location...</option>
-                {locations.map(l => {
-                  const co = companies.find(c => c.id === l.company_id);
-                  return <option key={l.id} value={l.id}>{l.name} ({co?.name || '?'})</option>;
-                })}
+          <form onSubmit={create} className="flex flex-wrap gap-2 items-center">
+            <input className={`${fld} flex-1 min-w-[180px]`} value={newName} onChange={e => setNewName(e.target.value)} placeholder="Deal name" autoFocus />
+            <input className={`${fld} w-32`} value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="Value (GBP)" type="number" step="0.01" />
+            <select className={`${fld} w-60`} value={newLocation} onChange={e => handleLocationChange(e.target.value)}>
+              <option value="">Select location...</option>
+              {locations.map(l => {
+                const co = companies.find(c => c.id === l.company_id);
+                return <option key={l.id} value={l.id}>{l.name} ({co?.name || '?'})</option>;
+              })}
+            </select>
+            {newCompany && (
+              <span className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-center gap-1.5 shrink-0">
+                {'\u{1F3E2}'} {companies.find(c => c.id === newCompany)?.name || ''}
+              </span>
+            )}
+            {!newLocation && (
+              <select className={`${fld} w-48`} value={newCompany} onChange={e => setNewCompany(e.target.value)}>
+                <option value="">Or select company...</option>
+                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              {newCompany && (
-                <span className="px-3 py-2 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600 flex items-center gap-1.5">
-                  {'\u{1F3E2}'} {companies.find(c => c.id === newCompany)?.name || ''}
-                </span>
-              )}
-              {!newLocation && (
-                <select className={input + ' w-48'} value={newCompany} onChange={e => setNewCompany(e.target.value)}>
-                  <option value="">Or select company...</option>
-                  {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              )}
-              <button type="submit" className="px-4 py-2 bg-ember text-white text-sm font-semibold rounded shrink-0">Create</button>
-              <button type="button" onClick={() => { setShowCreate(false); setNewLocation(''); setNewCompany(''); }}
-                className="px-3 py-2 text-sm text-muted border border-bdr rounded shrink-0">Cancel</button>
-            </div>
+            )}
+            <button type="submit" className="px-4 py-2 bg-ember text-white text-sm font-semibold rounded-xl shrink-0">Create</button>
+            <button type="button" onClick={() => { setShowCreate(false); setNewLocation(''); setNewCompany(''); }}
+              className="px-3 py-2 text-sm text-muted border border-bdr rounded-xl shrink-0">Cancel</button>
           </form>
         </div>
       )}
