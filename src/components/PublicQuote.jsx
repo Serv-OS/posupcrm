@@ -44,14 +44,15 @@ export default function PublicQuote({ token }) {
       const res = await fetch(`${FN}/quote-public`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, name: name.trim(), signature }) });
       const d = await res.json();
       if (!res.ok) { setError(d.error || 'Could not submit.'); setSubmitting(false); return; }
-      if (d.executed) { setDone(true); setSubmitting(false); return; }
+      // Deal is closed-won on signature; still collect payment if the quote requires it
       if (d.needs_payment) {
         const cs = await fetch(`${FN}/quote-checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, origin: window.location.origin }) });
         const cd = await cs.json();
         if (cs.ok && cd.url) { window.location.href = cd.url; return; }
-        setError(cd.error || 'Payment could not be started. Your signature was saved — we\'ll be in touch.');
-        setSubmitting(false);
+        // Payment couldn't start (e.g. Stripe not connected) — signature + close already done
+        setDone(true); setSubmitting(false); return;
       }
+      if (d.executed) { setDone(true); setSubmitting(false); return; }
     } catch { setError('Could not submit. Please try again.'); setSubmitting(false); }
   };
 

@@ -77,11 +77,11 @@ serve(async (req) => {
       status: "signed", signed_at: new Date().toISOString(), signed_by_name: name, signer_ip: ip, signature_path: signaturePath,
     }).eq("id", quote.id);
 
-    if (quote.payment_terms === "invoice_later") {
-      await supabase.rpc("execute_quote", { p_quote_id: quote.id });
-      return json({ executed: true });
-    }
-    return json({ signed: true, needs_payment: true });
+    // Signing closes the deal (won + onboarding) right away. Payment, if any,
+    // is still collected after — execute_quote is idempotent.
+    await supabase.rpc("execute_quote", { p_quote_id: quote.id });
+    if (quote.payment_terms === "invoice_later") return json({ executed: true });
+    return json({ executed: true, needs_payment: true });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }
