@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { TEAM_OPTIONS, TEAM_LABELS } from '../UsersPanel.jsx';
-import { fmtMinutes } from '../../lib/sla';
 
 const GMAIL_CLIENT_ID = '836252293153-ekl6o41r2kra549aqnjr9bvpiq2t4nfg.apps.googleusercontent.com';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -184,10 +183,10 @@ export default function SettingsPanel({ profile }) {
                 </div>
               </div>
               <div className="p-5">
-                <div className="grid grid-cols-[auto_1fr_1fr] gap-x-4 gap-y-2 items-center">
+                <div className="grid grid-cols-[auto_1fr_1fr] gap-x-4 gap-y-2.5 items-center">
                   <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">Priority</div>
-                  <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">First response (min)</div>
-                  <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">Resolution (min)</div>
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">First response</div>
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">Resolution</div>
                   {slaPolicies.map(p => (
                     <FragmentRow key={p.priority} p={p} isOwner={isOwner} saveSla={saveSla} />
                   ))}
@@ -330,23 +329,46 @@ export default function SettingsPanel({ profile }) {
 }
 
 function FragmentRow({ p, isOwner, saveSla }) {
-  const hint = (m) => fmtMinutes(m);
-  const cell = "w-full px-2 py-1.5 bg-card border border-bdr rounded-lg text-sm text-paper focus:outline-none focus:border-ember";
   return (
     <>
       <div className="text-sm font-bold text-paper">{p.priority}</div>
-      <div className="flex items-center gap-2">
-        <input type="number" min="0" disabled={!isOwner} defaultValue={p.first_response_minutes}
-          onBlur={e => saveSla(p.priority, 'first_response_minutes', e.target.value)}
-          className={cell} />
-        <span className="text-[10px] text-dim w-10 shrink-0">{hint(p.first_response_minutes)}</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <input type="number" min="0" disabled={!isOwner} defaultValue={p.resolution_minutes}
-          onBlur={e => saveSla(p.priority, 'resolution_minutes', e.target.value)}
-          className={cell} />
-        <span className="text-[10px] text-dim w-10 shrink-0">{hint(p.resolution_minutes)}</span>
-      </div>
+      <DurationInput minutes={p.first_response_minutes} disabled={!isOwner}
+        onSave={(m) => saveSla(p.priority, 'first_response_minutes', m)} />
+      <DurationInput minutes={p.resolution_minutes} disabled={!isOwner}
+        onSave={(m) => saveSla(p.priority, 'resolution_minutes', m)} />
     </>
+  );
+}
+
+const UNIT_FACTOR = { minutes: 1, hours: 60, days: 1440 };
+
+// Edit a duration as a value + unit (minutes/hours/days). Saves back in minutes.
+function DurationInput({ minutes, disabled, onSave }) {
+  // Choose the cleanest unit for the stored value
+  const initUnit = minutes % 1440 === 0 && minutes >= 1440 ? 'days'
+                 : minutes % 60 === 0 && minutes >= 60 ? 'hours' : 'minutes';
+  const [unit, setUnit] = useState(initUnit);
+  const [val, setVal] = useState(String(minutes / UNIT_FACTOR[initUnit]));
+
+  const commit = (v, u) => {
+    const m = Math.round(parseFloat(v) * UNIT_FACTOR[u]);
+    if (!isNaN(m) && m > 0 && m !== minutes) onSave(m);
+  };
+
+  const cell = "w-full px-2 py-1.5 bg-card border border-bdr rounded-lg text-sm text-paper focus:outline-none focus:border-ember";
+  return (
+    <div className="flex gap-1.5">
+      <input type="number" min="1" step="any" disabled={disabled} value={val}
+        onChange={e => setVal(e.target.value)}
+        onBlur={e => commit(e.target.value, unit)}
+        className={cell + ' flex-1'} />
+      <select disabled={disabled} value={unit}
+        onChange={e => { setUnit(e.target.value); commit(val, e.target.value); }}
+        className="px-2 py-1.5 bg-card border border-bdr rounded-lg text-sm text-paper focus:outline-none focus:border-ember shrink-0">
+        <option value="minutes">min</option>
+        <option value="hours">hrs</option>
+        <option value="days">days</option>
+      </select>
+    </div>
   );
 }
