@@ -119,13 +119,15 @@ export default function DealBoard({ profile, onSelectDeal, onNavigate }) {
 
   const create = async (e) => {
     e.preventDefault();
-    if (!newName.trim() || !newCompany) return;
-    const { data } = await supabase.from('deals').insert({
+    if (!newName.trim()) { alert('Please enter a deal name.'); return; }
+    if (!newCompany) { alert('Please select a location or a company for this deal.'); return; }
+    const { data, error } = await supabase.from('deals').insert({
       name: newName.trim(),
       company_id: newCompany,
       value: newValue ? parseFloat(newValue) : null,
       owner_id: profile.id,
     }).select().single();
+    if (error) { alert('Could not create deal: ' + error.message); return; }
     if (data) {
       // Write initial stage history
       await supabase.from('stage_history').insert({
