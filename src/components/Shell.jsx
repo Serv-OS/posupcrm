@@ -32,6 +32,8 @@ import ReleaseList from './crm/ReleaseList.jsx';
 import ReleaseDetail from './crm/ReleaseDetail.jsx';
 import ReportingDashboard from './crm/ReportingDashboard.jsx';
 import SettingsPanel from './crm/SettingsPanel.jsx';
+import FormsList from './crm/FormsList.jsx';
+import FormBuilder from './crm/FormBuilder.jsx';
 
 export default function Shell({ session }) {
   const [profile, setProfile]   = useState(null);
@@ -82,6 +84,7 @@ export default function Shell({ session }) {
     else if (type === 'ticket') { setView('ticket_detail'); setDetailId(id); }
     else if (type === 'project') { setView('project_detail'); setDetailId(id); }
     else if (type === 'task') { setView('task_detail'); setDetailId(id); }
+    else if (type === 'lead') { setView('leads'); } // no detail view; open the board
   };
 
   if (!profile) return <div className="h-full flex items-center justify-center text-muted text-sm">Loading profile...</div>;
@@ -137,6 +140,10 @@ export default function Shell({ session }) {
         return <SettingsPanel profile={profile} />;
       case 'account':
         return <AccountPanel profile={profile} onSaved={refreshProfile} />;
+      case 'forms':
+        return <FormsList profile={profile} onSelect={(id) => { setView('form_detail'); setDetailId(id); }} />;
+      case 'form_detail':
+        return <FormBuilder formId={detailId} profile={profile} onClose={() => setView('forms')} onNavigate={navigateTo} />;
       case 'tasks':
         return <TaskList profile={profile} onSelect={(id) => { setView('task_detail'); setDetailId(id); }} />;
       case 'task_detail':
