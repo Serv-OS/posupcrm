@@ -15,7 +15,7 @@ const STATUS_COLORS = {
   churned: 'bg-red-100 text-red-700 border border-red-200 border-red-500/30',
 };
 
-export default function LocationDetail({ locationId, profile, onClose, onNavigate }) {
+export default function LocationDetail({ locationId, profile, onClose, onNavigate, onCreateLead }) {
   const [location, setLocation] = useState(null);
   const [company, setCompany] = useState(null);
   const [deals, setDeals] = useState([]);
@@ -121,6 +121,7 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
         )}
         {canWrite && !editing && (
           <div className="flex gap-2">
+            <button onClick={() => onCreateLead?.({ locationId, companyId: location.company_id })} className="px-3 py-2 text-xs font-semibold rounded-xl bg-ember/15 text-ember-deep border border-ember/25 hover:bg-ember/25">+ Lead</button>
             <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>
             {profile.role === 'owner' && (
               <button onClick={deleteRecord} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-xl hover:bg-red-50 transition">Delete</button>

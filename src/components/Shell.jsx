@@ -50,6 +50,10 @@ export default function Shell({ session }) {
   const [openItem, setOpenItem] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [leadPrefill, setLeadPrefill] = useState(null);
+
+  // Start a lead from a record (company/location/contact detail "Create lead")
+  const startLead = (prefill) => { setLeadPrefill(prefill); setView('leads'); };
 
   const refreshProfile = async () => {
     const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
@@ -115,19 +119,19 @@ export default function Shell({ session }) {
         return <CompanyList profile={profile} onSelect={(id) => navigateTo('company', id)} />;
       case 'company_detail':
         return <CompanyDetail companyId={detailId} profile={profile}
-          onClose={() => setView('companies')} onNavigate={navigateTo} />;
+          onClose={() => setView('companies')} onNavigate={navigateTo} onCreateLead={startLead} />;
       case 'contacts':
         return <ContactList profile={profile} onSelect={(id) => navigateTo('contact', id)} />;
       case 'contact_detail':
         return <ContactDetail contactId={detailId} profile={profile}
-          onClose={() => setView('contacts')} onNavigate={navigateTo} />;
+          onClose={() => setView('contacts')} onNavigate={navigateTo} onCreateLead={startLead} />;
       case 'locations':
         return <LocationList profile={profile} onSelect={(id) => navigateTo('location', id)} onNavigate={navigateTo} />;
       case 'location_detail':
         return <LocationDetail locationId={detailId} profile={profile}
-          onClose={() => setView('locations')} onNavigate={navigateTo} />;
+          onClose={() => setView('locations')} onNavigate={navigateTo} onCreateLead={startLead} />;
       case 'leads':
-        return <LeadBoard profile={profile} onNavigate={navigateTo} />;
+        return <LeadBoard profile={profile} onNavigate={navigateTo} prefill={leadPrefill} onPrefillConsumed={() => setLeadPrefill(null)} />;
       case 'lead_detail':
         return <LeadDetail leadId={detailId} profile={profile} onClose={() => setView('leads')} onNavigate={navigateTo} />;
       case 'deals':

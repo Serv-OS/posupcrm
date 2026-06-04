@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 
 const STAGES = [
@@ -22,7 +22,7 @@ const PRIORITY_STYLES = {
 const SOURCE_OPTIONS = ['website', 'referral', 'cold_outreach', 'event', 'trade_show', 'social', 'inbound_call', 'inbound_email', 'pos_review_site', 'partner', 'other'];
 const VENUE_TYPES = ['restaurant', 'bar', 'cafe', 'fast_casual', 'qsr', 'hotel_fb', 'nightclub', 'food_hall', 'catering', 'other'];
 
-export default function LeadBoard({ profile, onNavigate }) {
+export default function LeadBoard({ profile, onNavigate, prefill, onPrefillConsumed }) {
   const [leads, setLeads] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -78,6 +78,19 @@ export default function LeadBoard({ profile, onNavigate }) {
     setContacts(ct.data || []);
     setMembers(m.data || []);
   };
+
+  // Open the create form pre-filled when arriving via "Create lead" from a record
+  const prefillDone = useRef(false);
+  useEffect(() => {
+    if (!prefill || prefillDone.current) return;
+    if (!companies.length && !locations.length && !contacts.length) return; // wait for data
+    prefillDone.current = true;
+    setShowCreate(true);
+    if (prefill.companyId) { const c = companies.find(x => x.id === prefill.companyId); if (c) { setSelectedCompany(c); setCompanySearch(c.name); setNewName(n => n || c.name); } }
+    if (prefill.locationId) { const l = locations.find(x => x.id === prefill.locationId); if (l) { setSelectedLocation(l); setLocationSearch(l.name); } }
+    if (prefill.contactId) { const ct = contacts.find(x => x.id === prefill.contactId); if (ct) { setSelectedContact(ct); setContactSearch([ct.first_name, ct.last_name].filter(Boolean).join(' ')); } }
+    onPrefillConsumed?.();
+  }, [prefill, companies, locations, contacts]);
 
   const filtered = useMemo(() => {
     if (!search) return leads;
@@ -191,7 +204,21 @@ export default function LeadBoard({ profile, onNavigate }) {
       if (loc?.company_id) companyId = loc.company_id;
     }
 
-    await supabase.from('leads').insert({
+    // A lead needs a company, a location AND a contact
+    const missing = [!companyId && 'a company', !locationId && 'a location', !contactId && 'a contact'].filter(Boolean);
+    if (missing.length) {
+      alert(`A lead needs ${missing.join(', ')}. Please add ${missing.length > 1 ? 'them' : 'it'} before creating the lead.`);
+      return;
+    }
+
+    // Link contact to company/location if not already
+    if (contactId && companyId) {
+      const { data: ex } = await supabase.from('associations').select('id')
+        .eq('from_type', 'contact').eq('from_id', contactId).eq('to_type', 'company').eq('to_id', companyId).limit(1);
+      if (!ex?.length) await supabase.from('associations').insert({ from_type: 'contact', from_id: contactId, to_type: 'company', to_id: companyId, label: 'primary_contact' });
+    }
+
+    const { data: newLead } = await supabase.from('leads').insert({
       name: newName.trim(),
       source: newSource,
       priority: newPriority,
@@ -203,7 +230,7 @@ export default function LeadBoard({ profile, onNavigate }) {
       current_pos: newCurrentPos.trim() || null,
       notes: newNotes.trim() || null,
       owner_id: profile.id,
-    });
+    }).select('id').single();
 
     // Reset form
     setNewName(''); setNewSource('website'); setNewPriority('medium'); setNewVenueType('');
@@ -214,6 +241,7 @@ export default function LeadBoard({ profile, onNavigate }) {
     setNewContactFirst(''); setNewContactLast(''); setNewContactEmail(''); setNewContactPhone('');
     setShowCreate(false);
     load();
+    if (newLead) onNavigate?.('lead', newLead.id);
   };
 
   const onDragStart = (e, lead) => { setDragItem(lead); e.dataTransfer.effectAllowed = 'move'; };

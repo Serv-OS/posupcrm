@@ -19,8 +19,36 @@ export default function LocationList({ profile, onSelect, onNavigate }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [leadFilter, setLeadFilter] = useState('all');
   const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [nName, setNName] = useState('');
+  const [nCompany, setNCompany] = useState('');
+  const [nNewCompany, setNNewCompany] = useState('');
+  const [nCity, setNCity] = useState('');
+  const [nVenue, setNVenue] = useState('');
+
+  const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
   useEffect(() => { load(); }, []);
+
+  const createLocation = async (e) => {
+    e.preventDefault();
+    if (!nName.trim()) { alert('Enter a location name.'); return; }
+    let companyId = nCompany;
+    if (nCompany === '__new__') {
+      if (!nNewCompany.trim()) { alert('Enter the new company name.'); return; }
+      const { data: co, error: cErr } = await supabase.from('companies').insert({ name: nNewCompany.trim(), owner_id: profile.id }).select('id').single();
+      if (cErr) { alert('Could not create company: ' + cErr.message); return; }
+      companyId = co.id;
+    }
+    if (!companyId) { alert('Select or create a company for this location.'); return; }
+    const { data, error } = await supabase.from('locations').insert({
+      name: nName.trim(), company_id: companyId, city: nCity.trim() || null,
+      venue_type: nVenue || null, status: 'prospect', owner_id: profile.id,
+    }).select('id').single();
+    if (error) { alert('Could not create location: ' + error.message); return; }
+    setNName(''); setNCompany(''); setNNewCompany(''); setNCity(''); setNVenue(''); setShowCreate(false);
+    if (data) onSelect(data.id); else load();
+  };
 
   const load = async () => {
     setLoading(true);
@@ -69,12 +97,46 @@ export default function LocationList({ profile, onSelect, onNavigate }) {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-6 py-4 border-b border-bdr">
-        <div className="text-lg font-bold text-paper">Locations</div>
-        <div className="text-[10px] text-dim font-mono uppercase tracking-[0.18em]">
-          {locations.length} total / {counts.live} live / {counts.onboarding} onboarding / {counts.prospect} prospect
+      <div className="px-6 py-4 border-b border-bdr flex items-center justify-between">
+        <div>
+          <div className="text-lg font-bold text-paper">Locations</div>
+          <div className="text-[10px] text-dim font-mono uppercase tracking-[0.18em]">
+            {locations.length} total / {counts.live} live / {counts.onboarding} onboarding / {counts.prospect} prospect
+          </div>
         </div>
+        {canWrite && (
+          <button onClick={() => setShowCreate(true)}
+            className="px-3 py-1.5 bg-ember text-white text-sm font-semibold rounded-xl hover:bg-ember-deep transition">+ Add location</button>
+        )}
       </div>
+
+      {showCreate && (
+        <div className="px-6 py-4 border-b border-bdr">
+          <form onSubmit={createLocation} className="flex flex-wrap gap-2 items-center">
+            <input className="flex-1 min-w-[180px] px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember"
+              value={nName} onChange={e => setNName(e.target.value)} placeholder="Location name" autoFocus />
+            <select className="px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper focus:outline-none focus:border-ember w-56"
+              value={nCompany} onChange={e => setNCompany(e.target.value)}>
+              <option value="">Select company…</option>
+              {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <option value="__new__">+ Create new company…</option>
+            </select>
+            {nCompany === '__new__' && (
+              <input className="px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember w-48"
+                value={nNewCompany} onChange={e => setNNewCompany(e.target.value)} placeholder="New company name" />
+            )}
+            <input className="px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember w-36"
+              value={nCity} onChange={e => setNCity(e.target.value)} placeholder="City" />
+            <select className="px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper focus:outline-none focus:border-ember w-40"
+              value={nVenue} onChange={e => setNVenue(e.target.value)}>
+              <option value="">Venue type…</option>
+              {['restaurant','bar','cafe','fast_casual','qsr','hotel_fb','nightclub','food_hall','catering','other'].map(v => <option key={v} value={v}>{v.replace(/_/g,' ')}</option>)}
+            </select>
+            <button type="submit" className="px-4 py-2 bg-ember text-white text-sm font-semibold rounded-xl shrink-0">Create</button>
+            <button type="button" onClick={() => setShowCreate(false)} className="px-3 py-2 text-sm text-muted border border-bdr rounded-xl shrink-0">Cancel</button>
+          </form>
+        </div>
+      )}
 
       <div className="px-6 py-3 border-b border-bdr flex items-center gap-2">
         <input value={search} onChange={e => setSearch(e.target.value)}

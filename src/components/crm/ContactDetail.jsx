@@ -7,7 +7,7 @@ import LeadBadge from './LeadBadge.jsx';
 import LeadsCard from './LeadsCard.jsx';
 import { primaryLead } from '../../lib/leadStages';
 
-export default function ContactDetail({ contactId, profile, onClose, onNavigate }) {
+export default function ContactDetail({ contactId, profile, onClose, onNavigate, onCreateLead }) {
   const [contact, setContact] = useState(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
@@ -75,6 +75,12 @@ export default function ContactDetail({ contactId, profile, onClose, onNavigate 
         )}
         {canWrite && !editing && (
           <div className="flex gap-2">
+            <button onClick={async () => {
+              const { data } = await supabase.from('associations').select('from_id, to_id, from_type, to_type')
+                .or(`and(from_type.eq.contact,from_id.eq.${contactId},to_type.eq.company),and(to_type.eq.contact,to_id.eq.${contactId},from_type.eq.company)`).limit(1);
+              const companyId = data && data.length ? (data[0].from_type === 'company' ? data[0].from_id : data[0].to_id) : null;
+              onCreateLead?.({ contactId, companyId });
+            }} className="px-3 py-2 text-xs font-semibold rounded-xl bg-ember/15 text-ember-deep border border-ember/25 hover:bg-ember/25">+ Lead</button>
             <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>
             {profile.role === 'owner' && (
               <button onClick={deleteRecord} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-xl hover:bg-red-50 transition">Delete</button>
