@@ -74,7 +74,7 @@ export default function PublicQuote({ token }) {
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
       {/* Header */}
       <div className="px-6 sm:px-8 py-6 border-b border-slate-200 flex items-start justify-between gap-4 flex-wrap">
-        {seller.logo_url ? <img src={seller.logo_url} alt={seller.name} className="h-12 object-contain" /> : <LogoLockup size={30} />}
+        {seller.logo_url ? <img src={seller.logo_url} alt={seller.name} className="h-20 sm:h-24 object-contain" /> : <LogoLockup size={48} />}
         <div className="text-right text-sm">
           <div className="text-lg font-bold text-slate-800">Order Form</div>
           <div className="text-slate-500">Quote #{q.number}</div>
