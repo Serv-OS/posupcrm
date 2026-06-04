@@ -5,6 +5,7 @@ import ConversationTimeline from './ConversationTimeline.jsx';
 import CallButton from '../CallButton.jsx';
 import SlaBadge from './SlaBadge.jsx';
 import { computeSla, fmtMinutes } from '../../lib/sla';
+import AttachmentsCard from './AttachmentsCard.jsx';
 
 const STAGES = ['new','in_progress','waiting_on_customer','escalated','resolved','closed'];
 const STAGE_LABELS = { new:'New', in_progress:'In Progress', waiting_on_customer:'Waiting on Customer', escalated:'Escalated', resolved:'Resolved', closed:'Closed' };
@@ -445,8 +446,10 @@ export default function TicketDetail({ ticketId, profile, onClose, onNavigate })
               </Card>
             </div>
 
-            {/* RIGHT: Projects + Stage History */}
+            {/* RIGHT: Attachments + Projects + Stage History */}
             <div className="col-span-4 space-y-4">
+              <AttachmentsCard subjectType="ticket" subjectId={ticketId} profile={profile} />
+
               <Card title="Projects" count={projects.length}
                 action={canWrite ? { label: '+ Create', onClick: createLinkedProject } : null}>
                 {projects.length > 0 ? (
