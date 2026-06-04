@@ -191,3 +191,44 @@ body {
 .prose-tight pre { background: rgba(0,0,0,0.06); padding: 10px; border-radius: 8px; overflow-x: auto; }
 .prose-tight ul, .prose-tight ol { margin: 0.3em 0; padding-left: 1.5em; }
 .prose-tight a { color: #c45a20; text-decoration: underline; }
+
+/* ============================================================
+   Mobile responsiveness
+   Stacks the desktop grid layouts and makes wide tables scroll,
+   so every detail/list page works on a phone without per-file edits.
+   ============================================================ */
+
+/* The sidebar drawer width on small screens */
+@media (max-width: 1023px) {
+  aside { width: 17rem; }
+}
+
+/* Stack the 3-column (grid-cols-12) detail layouts under lg */
+@media (max-width: 1023px) {
+  .grid.grid-cols-12 { grid-template-columns: minmax(0, 1fr) !important; }
+  .grid.grid-cols-12 > * { grid-column: auto !important; }
+}
+
+/* Shrink metric/field grids on small screens */
+@media (max-width: 640px) {
+  .grid.grid-cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .grid.grid-cols-3 { grid-template-columns: minmax(0, 1fr) !important; }
+  .grid.grid-cols-2 { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+/* Wide data tables scroll horizontally instead of overflowing the viewport */
+@media (max-width: 1023px) {
+  main table { display: block; width: max-content; min-width: 100%; overflow-x: auto; }
+  main thead, main tbody { display: table; width: 100%; table-layout: fixed; }
+}
+
+/* Comfortable tap targets + avoid accidental horizontal scroll on the page */
+@media (max-width: 640px) {
+  .max-w-\[1400px\], .max-w-5xl, .max-w-4xl, .max-w-3xl, .max-w-2xl { max-width: 100% !important; }
+}
+
+/* Toolbars / page headers wrap instead of overflowing on phones */
+@media (max-width: 640px) {
+  .border-b.flex.items-center { flex-wrap: wrap; row-gap: 0.5rem; }
+  input.w-72, input.w-56, input.w-48 { width: 100% !important; }
+}

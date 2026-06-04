@@ -238,7 +238,7 @@ export default function PhoneBar({ profile }) {
   };
 
   return (
-    <div className="glass px-4 py-2 flex items-center gap-3 h-full">
+    <div className="glass px-4 py-2 flex items-center gap-3 h-full overflow-x-auto">
       {/* Status indicator */}
       <div className="flex items-center gap-2">
         <div className={`w-2.5 h-2.5 rounded-full ${statusColors[status]}`} />
@@ -324,7 +324,7 @@ export default function PhoneBar({ profile }) {
       )}
 
       {/* Spacer + phone number */}
-      <div className="ml-auto text-[10px] text-dim font-mono">+44 7576 562085</div>
+      <div className="ml-auto text-[10px] text-dim font-mono hidden md:block">+44 7576 562085</div>
     </div>
   );
 }

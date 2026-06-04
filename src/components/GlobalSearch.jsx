@@ -73,7 +73,7 @@ export default function GlobalSearch({ onNavigate }) {
           onChange={e => setQ(e.target.value)}
           onFocus={() => { if (total > 0) setOpen(true); }}
           placeholder="Search…"
-          className="w-44 lg:w-64 pl-8 pr-3 py-1.5 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember focus:w-72 transition-all" />
+          className="w-28 sm:w-44 lg:w-64 pl-8 pr-3 py-1.5 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember sm:focus:w-72 transition-all" />
       </div>
 
       {open && q.trim().length >= 2 && (

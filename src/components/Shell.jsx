@@ -46,6 +46,7 @@ export default function Shell({ session }) {
   const [view, setView]         = useState('mywork');
   const [openItem, setOpenItem] = useState(null);
   const [detailId, setDetailId] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const refreshProfile = async () => {
     const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
@@ -178,20 +179,32 @@ export default function Shell({ session }) {
     }
   };
 
+  // Wrap setView so picking a nav item closes the mobile drawer
+  const setViewMobile = (v) => { setView(v); setSidebarOpen(false); };
+
   return (
     <div className="h-full flex">
-      <Sidebar
-        profile={profile}
-        projects={projects}
-        activeProject={activeProject}
-        setActiveProject={(p) => { setActiveProject(p); setView('board'); }}
-        view={view}
-        setView={setView}
-        onSignOut={signOut}
-        onRefresh={load}
-      />
+      {/* Mobile backdrop */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/40 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+      {/* Sidebar: off-canvas drawer on mobile, static on desktop */}
+      <div className={`fixed inset-y-0 left-0 z-40 flex shrink-0 transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <Sidebar
+          profile={profile}
+          projects={projects}
+          activeProject={activeProject}
+          setActiveProject={(p) => { setActiveProject(p); setViewMobile('board'); }}
+          view={view}
+          setView={setViewMobile}
+          onSignOut={signOut}
+          onRefresh={load}
+        />
+      </div>
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       <div className="flex items-stretch border-b border-bdr">
+        <button onClick={() => setSidebarOpen(true)}
+          className="lg:hidden px-3 glass flex items-center text-paper text-xl shrink-0" title="Menu">{'☰'}</button>
         <div className="flex-1 min-w-0"><PhoneBar profile={profile} /></div>
         <div className="glass flex items-center gap-2 px-3 shrink-0">
           <GlobalSearch onNavigate={navigateTo} />
