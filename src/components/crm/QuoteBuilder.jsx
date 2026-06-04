@@ -47,24 +47,22 @@ export default function QuoteBuilder({ quoteId, profile, onClose, onNavigate }) 
   const setQ = (k, v) => setQuote(prev => ({ ...prev, [k]: v }));
   const updateItem = (idx, patch) => setItems(items.map((it, i) => i === idx ? { ...it, ...patch } : it));
   const removeItem = (idx) => setItems(items.filter((_, i) => i !== idx));
-  const addCustom = () => setItems([...items, { product_id: null, name: '', category: 'hardware', billing_type: 'one_off', qty: 1, unit_price: 0, discount: 0 }]);
+  const addCustom = () => setItems([...items, { product_id: null, name: '', description: '', category: 'hardware', billing_type: 'one_off', qty: 1, unit_price: 0, discount: 0, tax_rate: 20 }]);
   const addProduct = (p) => setItems([...items, {
-    product_id: p.id, name: p.name, description: p.description, category: p.category,
-    billing_type: p.billing_type, qty: 1, unit_price: p.default_price, discount: 0,
+    product_id: p.id, name: p.name, description: p.description || '', category: p.category,
+    billing_type: p.billing_type, qty: 1, unit_price: p.default_price, discount: 0, tax_rate: 20,
   }]);
 
   const totals = useMemo(() => {
-    let oneOff = 0, saasArr = 0, paymentsArr = 0;
+    let oneOff = 0, tax = 0, saasArr = 0, paymentsArr = 0;
     items.forEach(it => {
       const lt = lineTotal(it);
       if (it.category === 'saas') saasArr += it.billing_type === 'monthly' ? lt * 12 : lt;
       else if (it.category === 'payments') paymentsArr += lt;
-      else if (it.billing_type === 'one_off') oneOff += lt;
+      else if (it.billing_type === 'one_off') { oneOff += lt; tax += lt * (Number(it.tax_rate) || 0) / 100; }
     });
-    const taxRate = Number(quote?.tax_rate) || 0;
-    const tax = oneOff * taxRate / 100;
     return { oneOff, tax, oneOffTotal: oneOff + tax, saasArr, paymentsArr, recurringArr: saasArr + paymentsArr };
-  }, [items, quote?.tax_rate]);
+  }, [items]);
 
   const save = async () => {
     setSaving(true); setSaved(false);
@@ -84,7 +82,7 @@ export default function QuoteBuilder({ quoteId, profile, onClose, onNavigate }) 
         quote_id: quoteId, product_id: it.product_id || null, name: it.name || 'Item',
         description: it.description || null, category: it.category, billing_type: it.billing_type,
         qty: Number(it.qty) || 0, unit_price: Number(it.unit_price) || 0, discount: Number(it.discount) || 0,
-        line_total: lineTotal(it), sort: i,
+        tax_rate: Number(it.tax_rate) || 0, line_total: lineTotal(it), sort: i,
       })));
     }
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2500);
@@ -161,7 +159,8 @@ export default function QuoteBuilder({ quoteId, profile, onClose, onNavigate }) 
                       <input className={cell + ' flex-1'} value={it.name} onChange={e => updateItem(idx, { name: e.target.value })} placeholder="Item name" />
                       <button onClick={() => removeItem(idx)} className="text-red-500 hover:text-red-600 text-sm shrink-0">×</button>
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                    <input className={cell + ' w-full text-xs'} value={it.description || ''} onChange={e => updateItem(idx, { description: e.target.value })} placeholder="Description (shown on the quote)" />
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                       <div><span className="text-[9px] text-dim block">Category</span>
                         <select className={cell + ' w-full text-xs'} value={it.category} onChange={e => updateItem(idx, { category: e.target.value })}>
                           {Object.entries(CAT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
@@ -171,6 +170,7 @@ export default function QuoteBuilder({ quoteId, profile, onClose, onNavigate }) 
                       <div><span className="text-[9px] text-dim block">Qty</span><input type="number" className={cell + ' w-full'} value={it.qty} onChange={e => updateItem(idx, { qty: e.target.value })} /></div>
                       <div><span className="text-[9px] text-dim block">Unit £</span><input type="number" className={cell + ' w-full'} value={it.unit_price} onChange={e => updateItem(idx, { unit_price: e.target.value })} /></div>
                       <div><span className="text-[9px] text-dim block">Disc %</span><input type="number" className={cell + ' w-full'} value={it.discount} onChange={e => updateItem(idx, { discount: e.target.value })} /></div>
+                      <div><span className="text-[9px] text-dim block">Tax %</span><input type="number" className={cell + ' w-full'} value={it.tax_rate ?? 20} onChange={e => updateItem(idx, { tax_rate: e.target.value })} disabled={it.category === 'saas' || it.category === 'payments'} /></div>
                     </div>
                     <div className="text-right text-xs text-muted">Line total: <span className="text-paper font-mono font-semibold">{money(lineTotal(it))}</span>{it.billing_type === 'monthly' ? '/mo' : it.category === 'payments' ? '/yr' : ''}</div>
                   </div>
@@ -190,7 +190,7 @@ export default function QuoteBuilder({ quoteId, profile, onClose, onNavigate }) 
             <div className="glass-card rounded-2xl p-4">
               <div className="text-sm font-bold text-paper mb-3">Totals</div>
               <Row k="One-off subtotal" v={money(totals.oneOff)} />
-              <Row k={`VAT (${quote.tax_rate || 0}%)`} v={money(totals.tax)} />
+              <Row k="VAT (per line)" v={money(totals.tax)} />
               <Row k="One-off total" v={money(totals.oneOffTotal)} bold />
               <div className="border-t border-bdr my-2" />
               <Row k="SaaS (ARR)" v={money(totals.saasArr)} sub />
@@ -202,7 +202,6 @@ export default function QuoteBuilder({ quoteId, profile, onClose, onNavigate }) 
             <div className="glass-card rounded-2xl p-4 space-y-3">
               <div className="text-sm font-bold text-paper">Settings</div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className={label}>Tax rate %</label><input type="number" className={input} value={quote.tax_rate ?? 20} onChange={e => setQ('tax_rate', e.target.value)} /></div>
                 <div><label className={label}>Status</label><select className={input} value={quote.status} onChange={e => setQ('status', e.target.value)}>
                   {['draft','sent','viewed','signed','paid','won','declined','expired','void'].map(s => <option key={s} value={s}>{s}</option>)}</select></div>
                 <div><label className={label}>Valid until</label><input type="date" className={input} value={quote.valid_until || ''} onChange={e => setQ('valid_until', e.target.value)} /></div>

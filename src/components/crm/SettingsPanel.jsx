@@ -65,6 +65,7 @@ export default function SettingsPanel({ profile }) {
       auto_reply_email_message: next.auto_reply_email_message ?? null,
       auto_reply_sms_enabled: next.auto_reply_sms_enabled ?? false,
       auto_reply_sms_message: next.auto_reply_sms_message ?? null,
+      quote_terms: next.quote_terms ?? null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'id' });
   };
@@ -282,6 +283,28 @@ export default function SettingsPanel({ profile }) {
                 <div className="text-[11px] text-dim leading-relaxed pt-1 border-t border-bdr">
                   Only the first message on a new ticket gets an auto-reply (no loops). Use <code className="bg-slate-100 px-1 rounded">{'{{contact_name}}'}</code> and <code className="bg-slate-100 px-1 rounded">{'{{ticket_number}}'}</code> as placeholders. Email auto-reply needs a connected support mailbox.
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quote terms */}
+          {settings && (
+            <div className="glass-card rounded-2xl overflow-hidden">
+              <div className="px-5 py-4 border-b border-bdr flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-ember/15 border border-ember/25 flex items-center justify-center text-lg">{'\u{1F4DC}'}</div>
+                <div className="flex-1">
+                  <div className="text-base font-bold text-paper">Quote terms &amp; conditions</div>
+                  <div className="text-xs text-muted">Default T&amp;Cs shown on every quote (a quote can override its own)</div>
+                </div>
+              </div>
+              <div className="p-5">
+                <textarea disabled={!isOwner} rows={6}
+                  className="w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember resize-none disabled:opacity-60"
+                  value={settings.quote_terms || ''}
+                  onChange={e => setSettings(s => ({ ...s, quote_terms: e.target.value }))}
+                  onBlur={e => saveSettings({ quote_terms: e.target.value })}
+                  placeholder="e.g. Prices exclude VAT unless stated. Hardware remains the property of ServOS until paid in full. 30-day payment terms…" />
+                {!isOwner && <div className="text-[11px] text-dim mt-1">Only owners can edit these.</div>}
               </div>
             </div>
           )}

@@ -3,6 +3,7 @@ import { supabase } from './lib/supabase';
 import Auth from './components/Auth.jsx';
 import Shell from './components/Shell.jsx';
 import PublicForm from './components/PublicForm.jsx';
+import PublicQuote from './components/PublicQuote.jsx';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -10,6 +11,8 @@ export default function App() {
 
   // Public, no-login form route: /f/<slug> (embeddable on any website)
   const formMatch = window.location.pathname.match(/^\/f\/([^/?#]+)/);
+  // Public quote route: /q/<token>
+  const quoteMatch = window.location.pathname.match(/^\/q\/([^/?#]+)/);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -22,6 +25,9 @@ export default function App() {
 
   if (formMatch) {
     return <PublicForm slug={decodeURIComponent(formMatch[1])} />;
+  }
+  if (quoteMatch) {
+    return <PublicQuote token={decodeURIComponent(quoteMatch[1])} />;
   }
 
   if (loading) {
