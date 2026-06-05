@@ -46,7 +46,7 @@ export default function Shell({ session }) {
   const [profile, setProfile]   = useState(null);
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
-  const [view, setView]         = useState('mywork');
+  const [view, setView]         = useState('contacts');
   const [openItem, setOpenItem] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
