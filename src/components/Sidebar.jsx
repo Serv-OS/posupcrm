@@ -79,8 +79,8 @@ export default function Sidebar({ profile, projects, activeProject, setActivePro
   return (
     <aside className="w-64 shrink-0 glass border-r border-bdr flex flex-col h-full">
       {/* Logo */}
-      <div className="px-4 py-4 border-b border-bdr shrink-0">
-        {logoUrl ? <img src={logoUrl} alt="Logo" className="h-8 object-contain" /> : <LogoLockup size={24} />}
+      <div className="px-4 py-5 border-b border-bdr shrink-0">
+        {logoUrl ? <img src={logoUrl} alt="Logo" className="h-12 object-contain" /> : <LogoLockup size={40} />}
       </div>
 
       {/* Nav */}

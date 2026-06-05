@@ -9,9 +9,10 @@ export function LogoMark({ size = 32, className = '' }) {
   );
 }
 
-export function Wordmark({ className = '' }) {
+export function Wordmark({ className = '', fontSize }) {
   return (
-    <span className={`font-display text-2xl tracking-tight ${className}`} style={{ lineHeight: 0.9 }}>
+    <span className={`font-display tracking-tight ${fontSize ? '' : 'text-2xl'} ${className}`}
+      style={{ lineHeight: 0.9, fontSize: fontSize ? `${fontSize}px` : undefined }}>
       Serv<span className="text-ember italic">OS</span>
     </span>
   );
@@ -21,7 +22,7 @@ export function LogoLockup({ size = 28, className = '' }) {
   return (
     <div className={`flex items-center gap-2.5 ${className}`}>
       <LogoMark size={size}/>
-      <Wordmark/>
+      <Wordmark fontSize={Math.round(size * 0.95)}/>
     </div>
   );
 }
