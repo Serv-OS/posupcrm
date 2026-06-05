@@ -41,9 +41,10 @@ const ACTIVE_MAP = {
 
 const DEFAULT_GROUPS = { appbuild: false, sales: true, delivery: false, support: false, product: false, insights: false };
 
-export default function Sidebar({ profile, projects, activeProject, setActiveProject, view, setView, onSignOut, onRefresh }) {
-  const [logoUrl, setLogoUrl] = useState(null);
-  useEffect(() => { supabase.from('support_settings').select('logo_url').eq('id', 1).maybeSingle().then(r => setLogoUrl(r.data?.logo_url || null)); }, []);
+export default function Sidebar({ profile, projects, activeProject, setActiveProject, view, setView, onSignOut, onRefresh, theme }) {
+  const [logos, setLogos] = useState({ light: null, dark: null });
+  useEffect(() => { supabase.from('support_settings').select('logo_url, logo_url_dark').eq('id', 1).maybeSingle().then(r => setLogos({ light: r.data?.logo_url || null, dark: r.data?.logo_url_dark || null })); }, []);
+  const logoUrl = theme === 'dark' ? (logos.dark || logos.light) : (logos.light);
 
   const [open, setOpen] = useState(() => {
     try { return { ...DEFAULT_GROUPS, ...(JSON.parse(localStorage.getItem('servos_nav_groups')) || {}) }; }

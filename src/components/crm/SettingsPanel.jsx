@@ -75,21 +75,23 @@ export default function SettingsPanel({ profile }) {
       business_phone: next.business_phone ?? null,
       quote_accent: next.quote_accent ?? null,
       logo_url: next.logo_url ?? null,
+      logo_url_dark: next.logo_url_dark ?? null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'id' });
   };
 
-  const uploadLogo = async (e) => {
+  const uploadLogo = async (e, field = 'logo_url') => {
     const file = e.target.files?.[0];
     if (!file) return;
     const ext = (file.name.split('.').pop() || 'png').toLowerCase();
-    const path = `logo-${Date.now()}.${ext}`;
+    const path = `${field === 'logo_url_dark' ? 'logo-dark' : 'logo'}-${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from('branding').upload(path, file, { upsert: true, contentType: file.type });
     if (error) { alert('Upload failed: ' + error.message); return; }
     const { data } = supabase.storage.from('branding').getPublicUrl(path);
-    setSettings(s => ({ ...s, logo_url: data.publicUrl }));
-    saveSettings({ logo_url: data.publicUrl });
+    setSettings(s => ({ ...s, [field]: data.publicUrl }));
+    saveSettings({ [field]: data.publicUrl });
   };
+  const clearLogo = (field) => { setSettings(s => ({ ...s, [field]: null })); saveSettings({ [field]: null }); };
 
   const fnUrl = (p) => `${SUPABASE_URL}/functions/v1/${p}`;
   const authHeader = async () => {
@@ -387,16 +389,31 @@ export default function SettingsPanel({ profile }) {
                 </div>
               </div>
               <div className="p-5 space-y-3">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-xl bg-card border border-bdr flex items-center justify-center overflow-hidden shrink-0">
-                    {settings.logo_url ? <img src={settings.logo_url} alt="Logo" className="w-full h-full object-contain" /> : <span className="text-[10px] text-dim text-center">No logo</span>}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Light-mode logo */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-16 rounded-xl bg-white border border-bdr flex items-center justify-center overflow-hidden shrink-0">
+                      {settings.logo_url ? <img src={settings.logo_url} alt="Light logo" className="w-full h-full object-contain" /> : <span className="text-[10px] text-dim text-center">No logo</span>}
+                    </div>
+                    <div className="min-w-0">
+                      <label className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block">Light-mode logo</label>
+                      {isOwner && <input type="file" accept="image/*" onChange={e => uploadLogo(e, 'logo_url')} className="text-xs text-paper file:mr-2 file:px-2 file:py-1 file:rounded-lg file:border-0 file:bg-ember file:text-white file:text-xs file:font-semibold w-full" />}
+                      {isOwner && settings.logo_url && <button onClick={() => clearLogo('logo_url')} className="text-[11px] text-red-600 hover:underline mt-1">Remove</button>}
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block">Logo</label>
-                    {isOwner && <input type="file" accept="image/*" onChange={uploadLogo} className="text-sm text-paper file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-ember file:text-white file:text-sm file:font-semibold" />}
-                    <div className="text-[11px] text-dim mt-1">Shown on quotes and in the app. PNG/SVG with transparent background works best.</div>
+                  {/* Dark-mode logo */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-16 rounded-xl bg-slate-800 border border-bdr flex items-center justify-center overflow-hidden shrink-0">
+                      {settings.logo_url_dark ? <img src={settings.logo_url_dark} alt="Dark logo" className="w-full h-full object-contain" /> : <span className="text-[10px] text-slate-400 text-center">No logo</span>}
+                    </div>
+                    <div className="min-w-0">
+                      <label className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block">Dark-mode logo</label>
+                      {isOwner && <input type="file" accept="image/*" onChange={e => uploadLogo(e, 'logo_url_dark')} className="text-xs text-paper file:mr-2 file:px-2 file:py-1 file:rounded-lg file:border-0 file:bg-ember file:text-white file:text-xs file:font-semibold w-full" />}
+                      {isOwner && settings.logo_url_dark && <button onClick={() => clearLogo('logo_url_dark')} className="text-[11px] text-red-600 hover:underline mt-1">Remove</button>}
+                    </div>
                   </div>
                 </div>
+                <div className="text-[11px] text-dim">Shown in the app sidebar (per theme). PNG/SVG with a transparent background works best. If no dark logo is set, the light one is used.</div>
                 <div className="grid grid-cols-2 gap-3">
                   <div><label className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block">Business name</label>
                     <input disabled={!isOwner} className="w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper focus:outline-none focus:border-ember disabled:opacity-60"
