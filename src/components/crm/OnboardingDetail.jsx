@@ -165,6 +165,23 @@ export default function OnboardingDetail({ onboardingId, profile, onClose, onNav
                     {members.map(m => <option key={m.id} value={m.id}>{m.display_name || m.email}</option>)}
                   </select></div>
               </div>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <div><label className={label}>Install location</label>
+                  <select className={input} value={draft.location_id || ''} onChange={e => set('location_id', e.target.value || null)}>
+                    <option value="">— None —</option>
+                    {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select></div>
+                <div><label className={label}>Onboarding call (date &amp; time)</label>
+                  <input type="datetime-local" className={input} value={(draft.kickoff_at || '').slice(0, 16)} onChange={e => set('kickoff_at', e.target.value || null)} /></div>
+                <div><label className={label}>Expected install date</label>
+                  <input type="date" className={input} value={draft.expected_install_date || ''} onChange={e => set('expected_install_date', e.target.value || null)} /></div>
+                <div><label className={label}>Actual install date</label>
+                  <input type="date" className={input} value={draft.actual_install_date || ''} onChange={e => set('actual_install_date', e.target.value || null)} /></div>
+                <div><label className={label}>Go-live date</label>
+                  <input type="date" className={input} value={draft.target_go_live || ''} onChange={e => set('target_go_live', e.target.value || null)} /></div>
+                <div><label className={label}>Activation date</label>
+                  <input type="date" className={input} value={draft.activation_date || ''} onChange={e => set('activation_date', e.target.value || null)} /></div>
+              </div>
               <div className="mt-3"><label className={label}>Notes</label><textarea className={input + ' resize-none'} rows={3} value={draft.notes || ''} onChange={e => set('notes', e.target.value)} /></div>
               <div className="flex gap-2 mt-4">
                 <button onClick={save} className="btn-glass px-5 py-2 rounded-xl text-sm">Save</button>
@@ -181,8 +198,19 @@ export default function OnboardingDetail({ onboardingId, profile, onClose, onNav
                 <div className="space-y-3">
                   <Field label="Stage" value={STAGE_LABELS[ob.stage]} />
                   <Field label="Owner" value={ownerName(ob.owner_id)} />
+                  <Field label="Install location" value={locations.find(l => l.id === ob.location_id)?.name} />
                   <Field label="Created" value={new Date(ob.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })} />
                   {ob.notes && <Field label="Notes" value={ob.notes} />}
+                </div>
+              </Card>
+
+              <Card title="Key Dates">
+                <div className="space-y-3">
+                  <Field label="Onboarding call" value={ob.kickoff_at ? new Date(ob.kickoff_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : null} />
+                  <Field label="Expected install" value={ob.expected_install_date ? new Date(ob.expected_install_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : null} />
+                  <Field label="Actual install" value={ob.actual_install_date ? new Date(ob.actual_install_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : null} />
+                  <Field label="Go-live" value={ob.target_go_live ? new Date(ob.target_go_live).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : null} />
+                  <Field label="Activation" value={ob.activation_date ? new Date(ob.activation_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : null} />
                 </div>
               </Card>
 

@@ -15,6 +15,9 @@ const STAGES = [
 export default function OnboardingBoard({ profile, onSelectOnboarding, onNavigate }) {
   const [onboardings, setOnboardings] = useState([]);
   const [companies, setCompanies] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [deals, setDeals] = useState([]);
+  const [assocs, setAssocs] = useState([]);
   const [members, setMembers] = useState([]);
   const [dragItem, setDragItem] = useState(null);
 
@@ -23,15 +26,36 @@ export default function OnboardingBoard({ profile, onSelectOnboarding, onNavigat
   useEffect(() => { load(); }, []);
 
   const load = async () => {
-    const [o, c, m] = await Promise.all([
+    const [o, c, m, l, d, a] = await Promise.all([
       supabase.from('onboardings').select('*').order('created_at'),
       supabase.from('companies').select('id, name').order('name'),
       supabase.from('profiles').select('id, email, display_name'),
+      supabase.from('locations').select('id, name, company_id'),
+      supabase.from('deals').select('id, name'),
+      supabase.from('associations').select('from_type, from_id, to_type, to_id').or('and(from_type.eq.deal,to_type.eq.location),and(from_type.eq.location,to_type.eq.deal)'),
     ]);
     setOnboardings(o.data || []);
     setCompanies(c.data || []);
     setMembers(m.data || []);
+    setLocations(l.data || []);
+    setDeals(d.data || []);
+    setAssocs(a.data || []);
   };
+
+  const dealName = (id) => deals.find(d => d.id === id)?.name || '';
+  const locationName = (o) => {
+    if (o.location_id) return locations.find(l => l.id === o.location_id)?.name || '';
+    // derive from the deal's affected location
+    if (o.deal_id) {
+      const a = assocs.find(x => (x.from_type === 'deal' && x.from_id === o.deal_id && x.to_type === 'location') || (x.to_type === 'deal' && x.to_id === o.deal_id && x.from_type === 'location'));
+      if (a) { const lid = a.from_type === 'location' ? a.from_id : a.to_id; return locations.find(l => l.id === lid)?.name || ''; }
+    }
+    // else company's first location
+    const cl = locations.find(l => l.company_id === o.company_id);
+    return cl?.name || '';
+  };
+  const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '';
+  const fmtDT = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
 
   const byStage = useMemo(() => {
     const map = {};
@@ -77,23 +101,49 @@ export default function OnboardingBoard({ profile, onSelectOnboarding, onNavigat
         <div className="h-full flex gap-2 px-4 py-3 min-w-max">
           {STAGES.map(stage => (
             <div key={stage.key}
-              className="w-52 shrink-0 flex flex-col glass-card rounded-2xl overflow-hidden"
+              className="w-72 shrink-0 flex flex-col glass-card rounded-2xl overflow-hidden"
               onDragOver={onDragOver} onDrop={e => onDrop(e, stage.key)}>
               <div className="px-3 py-2 border-b border-bdr" style={{ borderLeftColor: stage.color, borderLeftWidth: 3 }}>
                 <div className="text-[10px] font-bold uppercase tracking-wide text-paper">{stage.label}</div>
                 <div className="text-[9px] text-dim font-mono">{byStage[stage.key]?.length || 0}</div>
               </div>
               <div className="flex-1 overflow-y-auto p-1.5 space-y-1.5">
-                {(byStage[stage.key] || []).map(o => (
-                  <div key={o.id}
-                    draggable={canWrite}
-                    onDragStart={e => onDragStart(e, o)}
-                    onClick={() => onSelectOnboarding(o.id)}
-                    className="glass-inner rounded-xl p-2.5 cursor-pointer">
-                    <div className="text-xs text-paper font-medium">{companyName(o.company_id)}</div>
-                    {o.owner_id && <div className="text-[10px] text-dim mt-1">{ownerName(o.owner_id)}</div>}
-                  </div>
-                ))}
+                {(byStage[stage.key] || []).map(o => {
+                  const rows = [
+                    ['Company', companyName(o.company_id)],
+                    ['Location', locationName(o)],
+                    ['Deal', dealName(o.deal_id)],
+                    ['Call', fmtDT(o.kickoff_at)],
+                    ['Exp. install', fmtD(o.expected_install_date)],
+                    ['Install', fmtD(o.actual_install_date)],
+                    ['Go live', fmtD(o.target_go_live)],
+                    ['Activation', fmtD(o.activation_date)],
+                  ].filter(([, v]) => v);
+                  return (
+                    <div key={o.id}
+                      draggable={canWrite}
+                      onDragStart={e => onDragStart(e, o)}
+                      onClick={() => onSelectOnboarding(o.id)}
+                      className="glass-inner rounded-xl p-3 cursor-pointer">
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {rows.map(([k, v]) => (
+                            <tr key={k}>
+                              <td className="py-0.5 pr-3 text-dim font-mono whitespace-nowrap align-top">{k}</td>
+                              <td className="py-0.5 text-paper">{v}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {o.owner_id && (
+                        <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-bdr">
+                          <span className="w-5 h-5 rounded-full bg-ember text-white text-[9px] font-bold flex items-center justify-center">{ownerName(o.owner_id)[0]?.toUpperCase() || '?'}</span>
+                          <span className="text-[10px] text-muted">{ownerName(o.owner_id)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
