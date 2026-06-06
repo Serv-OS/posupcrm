@@ -4,7 +4,7 @@ import { LogoLockup } from './ServOSLogo.jsx';
 import {
   Home, Building2, MapPin, User, Target, Banknote, Box, Rocket, Folder, CheckSquare,
   Ticket, ClipboardList, FileText, LayoutGrid, Sparkles, Flag, BarChart3,
-  Bug, Star, List, Layout, Layers, Package, ChevronRight, Plus, Mail, Calendar,
+  Bug, Star, List, Layout, Layers, Package, ChevronRight, Plus, Mail, Calendar, MessageSquare,
   Settings as SettingsIcon, Users as UsersIcon,
 } from 'lucide-react';
 
@@ -115,6 +115,7 @@ export default function Sidebar({ profile, projects, activeProject, setActivePro
           <NavItem icon={Home} label="My Work" active={activeKey === 'mywork'} onClick={() => setView('mywork')} />
           <NavItem icon={Mail} label="Inbox" active={activeKey === 'inbox'} onClick={() => setView('inbox')} />
           <NavItem icon={Calendar} label="Calendar" active={activeKey === 'calendar'} onClick={() => setView('calendar')} />
+          <NavItem icon={MessageSquare} label="Chat" active={activeKey === 'chat'} onClick={() => setView('chat')} />
         </div>
 
         {/* Collapsible groups */}
