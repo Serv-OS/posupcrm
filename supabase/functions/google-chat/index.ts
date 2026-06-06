@@ -63,7 +63,7 @@ async function listMembers(space: string, H: Record<string, string>) {
   try {
     const r = await fetch(`${CHAT}/${space}/members?pageSize=100`, { headers: H });
     const d = await r.json();
-    if (!r.ok) { console.log("DBG members.list FAIL", space, r.status, JSON.stringify(d).slice(0, 400)); return []; }
+    if (!r.ok) return [];
     return (d.memberships || []).map((m: any) => ({
       id: m.member?.name || "",
       displayName: m.member?.displayName || "",
@@ -86,14 +86,14 @@ async function resolveNames(ids: string[], H: Record<string, string>): Promise<R
     try {
       const r = await fetch(`https://people.googleapis.com/v1/people:batchGet?${params}`, { headers: H });
       const d = await r.json();
-      if (!r.ok) { console.log("DBG people FAIL", r.status, JSON.stringify(d).slice(0, 300)); continue; }
+      if (!r.ok) continue;
       for (const resp of (d.responses || [])) {
         const rn = resp.requestedResourceName || resp.person?.resourceName || "";
         const idNum = rn.replace("people/", "");
         const name = resp.person?.names?.[0]?.displayName || resp.person?.emailAddresses?.[0]?.value || "";
         if (idNum && name) map[`users/${idNum}`] = name;
       }
-    } catch (e) { console.log("DBG people THREW", (e as Error).message); }
+    } catch { /* ignore batch failure */ }
   }
   return map;
 }
