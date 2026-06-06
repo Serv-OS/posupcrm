@@ -50,11 +50,41 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { title, description, start, end, attendees = [], subject_type, subject_id, contact_id, location } = body;
-    if (!title || !start) return json({ error: "Missing title or start time" }, 422);
 
     const accessToken = await freshAccessToken(supabase, integ);
     if (!accessToken) return json({ error: "Google session expired — reconnect in My Account." }, 401);
+
+    // ---- LIST: upcoming events in a time window ----
+    if (body.action === "list") {
+      const timeMin = body.timeMin ? new Date(body.timeMin).toISOString() : new Date().toISOString();
+      const timeMax = body.timeMax ? new Date(body.timeMax).toISOString() : new Date(Date.now() + 14 * 86400000).toISOString();
+      const params = new URLSearchParams({
+        timeMin, timeMax, singleEvents: "true", orderBy: "startTime", maxResults: "100",
+      });
+      const r = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const d = await r.json();
+      if (!r.ok) return json({ error: d.error?.message || "Could not load calendar." }, 400);
+      const items = (d.items || []).map((e: any) => ({
+        id: e.id,
+        summary: e.summary || "(no title)",
+        description: e.description || "",
+        location: e.location || "",
+        start: e.start?.dateTime || e.start?.date,
+        end: e.end?.dateTime || e.end?.date,
+        allDay: !e.start?.dateTime,
+        htmlLink: e.htmlLink,
+        hangoutLink: e.hangoutLink || null,
+        attendees: (e.attendees || []).map((a: any) => a.email),
+        status: e.status,
+      }));
+      return json({ events: items });
+    }
+
+    // ---- CREATE (default) ----
+    const { title, description, start, end, attendees = [], subject_type, subject_id, contact_id, location } = body;
+    if (!title || !start) return json({ error: "Missing title or start time" }, 422);
 
     const tz = "Europe/London";
     const startISO = new Date(start).toISOString();

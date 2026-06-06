@@ -38,6 +38,7 @@ import FormBuilder from './crm/FormBuilder.jsx';
 import TemplatesPanel from './crm/TemplatesPanel.jsx';
 import MyWork from './crm/MyWork.jsx';
 import InboxPanel from './crm/InboxPanel.jsx';
+import CalendarPanel from './crm/CalendarPanel.jsx';
 import DataPanel from './crm/DataPanel.jsx';
 import LeadDetail from './crm/LeadDetail.jsx';
 import ProductsPanel from './crm/ProductsPanel.jsx';
@@ -108,6 +109,7 @@ export default function Shell({ session }) {
     else if (type === 'quote') { setView('quote_detail'); setDetailId(id); }
     else if (type === 'account') { setView('account'); }
     else if (type === 'inbox') { setView('inbox'); }
+    else if (type === 'calendar') { setView('calendar'); }
     // List shortcuts (used by My Work "View all")
     else if (type === 'ticket_list') { setView('tickets'); }
     else if (type === 'task_list') { setView('tasks'); }
@@ -123,6 +125,8 @@ export default function Shell({ session }) {
         return <MyWork profile={profile} onNavigate={navigateTo} />;
       case 'inbox':
         return <InboxPanel profile={profile} onNavigate={navigateTo} />;
+      case 'calendar':
+        return <CalendarPanel profile={profile} onNavigate={navigateTo} />;
       case 'users':
         return <UsersPanel profile={profile} />;
       case 'features':
