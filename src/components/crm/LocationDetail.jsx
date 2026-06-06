@@ -146,7 +146,11 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
                 <div><label className={label}>Postcode</label><input className={input} value={draft.postcode || ''} onChange={e => set('postcode', e.target.value)} /></div>
                 <div><label className={label}>Phone</label><input className={input} value={draft.phone || ''} onChange={e => set('phone', e.target.value)} /></div>
                 <div><label className={label}>Email</label><input className={input} value={draft.email || ''} onChange={e => set('email', e.target.value)} /></div>
+                <div><label className={label}>Onboarding call</label><input className={input} type="datetime-local" value={(draft.kickoff_at || '').slice(0, 16)} onChange={e => set('kickoff_at', e.target.value || null)} /></div>
+                <div><label className={label}>Expected install date</label><input className={input} type="date" value={draft.expected_install_date || ''} onChange={e => set('expected_install_date', e.target.value || null)} /></div>
+                <div><label className={label}>Actual install date</label><input className={input} type="date" value={draft.actual_install_date || ''} onChange={e => set('actual_install_date', e.target.value || null)} /></div>
                 <div><label className={label}>Go-live date</label><input className={input} type="date" value={draft.go_live_date || ''} onChange={e => set('go_live_date', e.target.value || null)} /></div>
+                <div><label className={label}>Activation date</label><input className={input} type="date" value={draft.activation_date || ''} onChange={e => set('activation_date', e.target.value || null)} /></div>
                 <div><label className={label}>Owner</label><select className={input} value={draft.owner_id || ''} onChange={e => set('owner_id', e.target.value || null)}>
                   <option value="">Unassigned</option>{members.map(m => <option key={m.id} value={m.id}>{m.display_name || m.email}</option>)}</select></div>
               </div>
@@ -170,9 +174,18 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
                   <Field label="Venue Type" value={location.venue_type} />
                   <Field label="Covers" value={location.covers} />
                   <Field label="Status" value={location.status} badge={STATUS_COLORS[location.status]} />
-                  <Field label="Go-live Date" value={location.go_live_date ? new Date(location.go_live_date).toLocaleDateString('en-GB') : null} />
                   <Field label="Owner" value={ownerName(location.owner_id)} />
                   {location.notes && <Field label="Notes" value={location.notes} />}
+                </div>
+              </Card>
+
+              <Card title="Key Dates">
+                <div className="space-y-3">
+                  <Field label="Onboarding call" value={location.kickoff_at ? new Date(location.kickoff_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : null} />
+                  <Field label="Expected install" value={location.expected_install_date ? new Date(location.expected_install_date).toLocaleDateString('en-GB') : null} />
+                  <Field label="Actual install" value={location.actual_install_date ? new Date(location.actual_install_date).toLocaleDateString('en-GB') : null} />
+                  <Field label="Go-live" value={location.go_live_date ? new Date(location.go_live_date).toLocaleDateString('en-GB') : null} />
+                  <Field label="Activation" value={location.activation_date ? new Date(location.activation_date).toLocaleDateString('en-GB') : null} />
                 </div>
               </Card>
 
