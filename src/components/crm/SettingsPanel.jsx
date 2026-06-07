@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { TEAM_OPTIONS, TEAM_LABELS } from '../UsersPanel.jsx';
 import AiSettingsCard from './AiSettingsCard.jsx';
+import BrandingCard from './BrandingCard.jsx';
 
-const GMAIL_CLIENT_ID = '836252293153-ekl6o41r2kra549aqnjr9bvpiq2t4nfg.apps.googleusercontent.com';
+const GMAIL_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '836252293153-ekl6o41r2kra549aqnjr9bvpiq2t4nfg.apps.googleusercontent.com';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const REDIRECT_URI = `${SUPABASE_URL}/functions/v1/gmail-oauth-callback`;
 const SCOPES = 'https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send';
@@ -177,6 +178,9 @@ export default function SettingsPanel({ profile }) {
 
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-3xl space-y-6">
+
+          {/* Branding & white-label */}
+          <BrandingCard profile={profile} />
 
           {/* AI Assistant (Claude) */}
           <AiSettingsCard profile={profile} />

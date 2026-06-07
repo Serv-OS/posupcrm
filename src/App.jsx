@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
+import { loadBranding } from './lib/branding';
 import Auth from './components/Auth.jsx';
 import Shell from './components/Shell.jsx';
 import PublicForm from './components/PublicForm.jsx';
@@ -15,6 +16,7 @@ export default function App() {
   const quoteMatch = window.location.pathname.match(/^\/q\/([^/?#]+)/);
 
   useEffect(() => {
+    loadBranding(); // apply this instance's app name + brand colours
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setLoading(false);

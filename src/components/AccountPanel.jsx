@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { TEAM_LABELS } from './UsersPanel.jsx';
 
-const GOOGLE_CLIENT_ID = '836252293153-ekl6o41r2kra549aqnjr9bvpiq2t4nfg.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '836252293153-ekl6o41r2kra549aqnjr9bvpiq2t4nfg.apps.googleusercontent.com';
 const REDIRECT_URI = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gmail-oauth-callback`;
 const PERSONAL_SCOPES = 'openid email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.messages https://www.googleapis.com/auth/chat.memberships.readonly https://www.googleapis.com/auth/directory.readonly';
 
