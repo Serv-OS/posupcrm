@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import TimerButton from './TimerButton.jsx';
 
 const STATUS_STYLES = {
   todo: 'bg-blue-100 text-blue-700 border border-blue-200',
@@ -199,9 +200,10 @@ export default function ProjectDetail({ projectId, profile, onClose, onSelectTas
             })()}
           </div>
         </div>
-        {canWrite && !editing && (
-          <div className="flex gap-2">
-            <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>
+        {!editing && (
+          <div className="flex gap-2 items-center">
+            <TimerButton subjectType="project" subjectId={projectId} label={project.name} profile={profile} />
+            {canWrite && <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>}
             {profile.role === 'owner' && (
               <button onClick={deleteRecord} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-xl hover:bg-red-50 transition">Delete</button>
             )}

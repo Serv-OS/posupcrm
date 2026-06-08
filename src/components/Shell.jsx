@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase';
 import Sidebar from './Sidebar.jsx';
 import PhoneBar from './PhoneBar.jsx';
 import NotificationBell from './NotificationBell.jsx';
+import TimerWidget from './TimerWidget.jsx';
+import TimePanel from './crm/TimePanel.jsx';
 import GlobalSearch from './GlobalSearch.jsx';
 import AccountPanel from './AccountPanel.jsx';
 import Board from './Board.jsx';
@@ -188,6 +190,8 @@ export default function Shell({ session }) {
         return <SettingsPanel profile={profile} />;
       case 'account':
         return <AccountPanel profile={profile} onSaved={refreshProfile} />;
+      case 'time':
+        return <TimePanel profile={profile} onNavigate={navigateTo} />;
       case 'templates':
         return <TemplatesPanel profile={profile} />;
       case 'forms':
@@ -244,6 +248,7 @@ export default function Shell({ session }) {
           <PhoneBar profile={profile} />
         </div>
         <div className="order-2 lg:order-2 flex-1 lg:flex-none flex items-center justify-end gap-2 px-3 glass">
+          <TimerWidget profile={profile} onNavigate={navigateTo} />
           <GlobalSearch onNavigate={navigateTo} />
           <button onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
             className="w-9 h-9 rounded-xl flex items-center justify-center text-muted hover:text-paper hover:bg-card transition shrink-0"

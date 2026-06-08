@@ -6,6 +6,7 @@ import CallButton from '../CallButton.jsx';
 import SlaBadge from './SlaBadge.jsx';
 import { computeSla, fmtMinutes } from '../../lib/sla';
 import AttachmentsCard from './AttachmentsCard.jsx';
+import TimerButton from './TimerButton.jsx';
 
 const STAGES = ['new','in_progress','waiting_on_customer','escalated','resolved','closed'];
 const STAGE_LABELS = { new:'New', in_progress:'In Progress', waiting_on_customer:'Waiting on Customer', escalated:'Escalated', resolved:'Resolved', closed:'Closed' };
@@ -222,9 +223,10 @@ export default function TicketDetail({ ticketId, profile, onClose, onNavigate })
             {ticket.customer_email && <span className="text-xs text-muted">{ticket.customer_email}</span>}
           </div>
         </div>
-        {canWrite && !editing && (
-          <div className="flex gap-2">
-            <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>
+        {!editing && (
+          <div className="flex gap-2 items-center">
+            <TimerButton subjectType="ticket" subjectId={ticketId} label={ticket.subject} profile={profile} />
+            {canWrite && <button onClick={startEdit} className="btn-ghost px-4 py-2 rounded-xl text-sm">Edit</button>}
             {profile.role === 'owner' && (
               <button onClick={deleteRecord} className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-xl hover:bg-red-50 transition">Delete</button>
             )}

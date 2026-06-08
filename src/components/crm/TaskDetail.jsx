@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import TimerButton from './TimerButton.jsx';
 
 const STATUS_OPTIONS = ['todo', 'in_progress', 'blocked', 'done'];
 const STATUS_STYLES = {
@@ -157,15 +158,16 @@ export default function TaskDetail({ taskId, profile, onClose, onNavigate }) {
             )}
           </div>
         </div>
-        {canWrite && !editing && (
-          <div className="flex gap-2 shrink-0">
-            {STATUS_OPTIONS.filter(s => s !== task.status).map(s => (
+        {!editing && (
+          <div className="flex gap-2 shrink-0 items-center">
+            <TimerButton subjectType="task" subjectId={taskId} label={task.title} profile={profile} />
+            {canWrite && STATUS_OPTIONS.filter(s => s !== task.status).map(s => (
               <button key={s} onClick={() => changeStatus(s)}
                 className={`px-2.5 py-1.5 text-[10px] font-bold uppercase rounded-xl ${STATUS_STYLES[s]} hover:opacity-80 transition`}>
                 {s === 'done' ? 'Complete' : s.replace('_', ' ')}
               </button>
             ))}
-            <button onClick={startEdit} className="btn-ghost px-3 py-1.5 rounded-xl text-xs">Edit</button>
+            {canWrite && <button onClick={startEdit} className="btn-ghost px-3 py-1.5 rounded-xl text-xs">Edit</button>}
             {profile.role === 'owner' && (
               <button onClick={deleteTask} className="px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-xl hover:bg-red-50 transition">Delete</button>
             )}
