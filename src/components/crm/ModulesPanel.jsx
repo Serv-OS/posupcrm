@@ -16,8 +16,27 @@ export default function ModulesPanel({ profile }) {
   const [locationModules, setLocationModules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedLocation, setSelectedLocation] = useState('all');
+  const [editModule, setEditModule] = useState(null);
 
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
+
+  const saveModule = async (m) => {
+    const name = (m.name || '').trim();
+    if (!name) { alert('Module name is required'); return; }
+    const row = { name, description: (m.description || '').trim() || null, icon: (m.icon || '').trim() || null, sort_order: Number(m.sort_order) || 0 };
+    const { error } = m.id
+      ? await supabase.from('modules').update(row).eq('id', m.id)
+      : await supabase.from('modules').insert(row);
+    if (error) { alert(error.message); return; }
+    setEditModule(null); load();
+  };
+
+  const removeModule = async (m) => {
+    if (!confirm(`Remove module "${m.name}"?\n\nThis also removes it from every location.`)) return;
+    await supabase.from('location_modules').delete().eq('module_id', m.id);
+    await supabase.from('modules').delete().eq('id', m.id);
+    load();
+  };
 
   useEffect(() => { load(); }, []);
 
@@ -98,16 +117,28 @@ export default function ModulesPanel({ profile }) {
 
       {/* Module catalogue overview */}
       <div className="px-6 py-4 border-b border-bdr">
-        <div className={label + ' mb-3'}>Module Catalogue</div>
+        <div className="flex items-center mb-3">
+          <div className={label}>Module Catalogue</div>
+          {canWrite && (
+            <button onClick={() => setEditModule({ name: '', description: '', icon: '', sort_order: (modules.at(-1)?.sort_order || 0) + 1 })}
+              className="ml-auto text-xs text-ember hover:text-ember-deep font-medium">+ Add module</button>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-2">
           {modules.map(m => {
             const s = moduleStats[m.id] || { total: 0, live: 0, enabling: 0 };
             return (
-              <div key={m.id} className="bg-card/50 border border-bdr rounded-lg px-3 py-2 flex items-center gap-3">
+              <div key={m.id} className="bg-card/50 border border-bdr rounded-lg px-3 py-2 flex items-center gap-3 group">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-paper">{m.name}</div>
                   <div className="text-xs text-dim">{m.description}</div>
                 </div>
+                {canWrite && (
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition shrink-0">
+                    <button onClick={() => setEditModule(m)} title="Edit" className="text-dim hover:text-paper p-1">✎</button>
+                    <button onClick={() => removeModule(m)} title="Remove" className="text-dim hover:text-red-600 p-1">🗑</button>
+                  </div>
+                )}
                 <div className="text-right shrink-0">
                   <div className="text-sm text-paper font-mono">{s.live}</div>
                   <div className="text-[9px] text-dim">live</div>
@@ -179,6 +210,37 @@ export default function ModulesPanel({ profile }) {
             </tbody>
           </table>
         )}
+      </div>
+
+      {editModule && <ModuleModal module={editModule} onSave={saveModule} onClose={() => setEditModule(null)} />}
+    </div>
+  );
+}
+
+function ModuleModal({ module, onSave, onClose }) {
+  const [f, setF] = useState({ name: module.name || '', description: module.description || '', icon: module.icon || '', sort_order: module.sort_order ?? 0 });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const input = "w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper focus:outline-none focus:border-ember";
+  const lbl = "text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block";
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="glass-card rounded-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-bdr flex items-center justify-between">
+          <div className="text-base font-bold text-paper">{module.id ? 'Edit module' : 'Add module'}</div>
+          <button onClick={onClose} className="text-muted hover:text-paper text-lg leading-none">×</button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div><label className={lbl}>Name</label><input className={input} value={f.name} onChange={e => set('name', e.target.value)} autoFocus placeholder="e.g. Loyalty" /></div>
+          <div><label className={lbl}>Description</label><input className={input} value={f.description} onChange={e => set('description', e.target.value)} placeholder="What this module does" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Icon (emoji, optional)</label><input className={input} value={f.icon} onChange={e => set('icon', e.target.value)} placeholder="🎁" /></div>
+            <div><label className={lbl}>Sort order</label><input type="number" className={input} value={f.sort_order} onChange={e => set('sort_order', e.target.value)} /></div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button onClick={() => onSave({ ...module, ...f })} className="btn-glass px-5 py-2 rounded-xl text-sm font-semibold">Save</button>
+            <button onClick={onClose} className="btn-ghost px-4 py-2 rounded-xl text-sm">Cancel</button>
+          </div>
+        </div>
       </div>
     </div>
   );
