@@ -281,10 +281,10 @@ export default function TicketDetail({ ticketId, profile, onClose, onNavigate })
             </Card>
           </div>
         ) : (
-          <div className="grid grid-cols-12 gap-4 max-w-[1400px]">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 max-w-[1600px] mx-auto">
 
-            {/* LEFT: Key Info + Company + Locations */}
-            <div className="col-span-4 space-y-4">
+            {/* LEFT: Customer + SLA + Key Info */}
+            <div className="lg:col-span-3 space-y-5 order-2 lg:order-1">
               {/* Customer card: show who contacted us, match or create a contact */}
               {(ticket.customer_phone || ticket.customer_email || matchedContact) && (
                 <Card title="Customer">
@@ -383,6 +383,44 @@ export default function TicketDetail({ ticketId, profile, onClose, onNavigate })
                 })()}
               </Card>
 
+              {/* Contact context: companies/locations pulled from linked contacts */}
+              {(contactContext.companies.length > 0 || contactContext.locations.length > 0) && (
+                <Card title="Via Contact">
+                  <div className="space-y-2">
+                    {contactContext.companies.map(c => (
+                      <div key={c.id} onClick={() => onNavigate?.('company', c.id)}
+                        className="p-2 glass-inner rounded-xl cursor-pointer flex items-center gap-2">
+                        <span className="text-sm">{'\u{1F3E2}'}</span>
+                        <span className="text-xs text-paper">{c.name}</span>
+                      </div>
+                    ))}
+                    {contactContext.locations.map(l => (
+                      <div key={l.id} onClick={() => onNavigate?.('location', l.id)}
+                        className="p-2 glass-inner rounded-xl cursor-pointer flex items-center gap-2">
+                        <span className="text-sm">{'\u{1F4CD}'}</span>
+                        <span className="text-xs text-paper">{l.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+            </div>
+
+            {/* CENTER: Conversation (hero) */}
+            <div className="lg:col-span-6 space-y-5 order-1 lg:order-2">
+              <Card title="Conversation" noPadding>
+                <div className="h-[660px]">
+                  <ConversationTimeline subjectType="ticket" subjectId={ticketId} profile={profile} contacts={[]} ticket={ticket} />
+                </div>
+              </Card>
+
+              <Card title="Contacts">
+                <AssociationManager subjectType="ticket" subjectId={ticketId} targetType="contact" profile={profile} onNavigate={onNavigate} />
+              </Card>
+            </div>
+
+            {/* RIGHT: Company, Locations, Attachments, Projects, History */}
+            <div className="lg:col-span-3 space-y-5 order-3">
               <Card title="Company">
                 {company ? (
                   <div onClick={() => onNavigate?.('company', company.id)}
@@ -410,44 +448,6 @@ export default function TicketDetail({ ticketId, profile, onClose, onNavigate })
                 ) : <Empty>No locations</Empty>}
               </Card>
 
-              {/* Contact context: companies/locations pulled from linked contacts */}
-              {(contactContext.companies.length > 0 || contactContext.locations.length > 0) && (
-                <Card title="Via Contact">
-                  <div className="space-y-2">
-                    {contactContext.companies.map(c => (
-                      <div key={c.id} onClick={() => onNavigate?.('company', c.id)}
-                        className="p-2 glass-inner rounded-xl cursor-pointer flex items-center gap-2">
-                        <span className="text-sm">{'\u{1F3E2}'}</span>
-                        <span className="text-xs text-paper">{c.name}</span>
-                      </div>
-                    ))}
-                    {contactContext.locations.map(l => (
-                      <div key={l.id} onClick={() => onNavigate?.('location', l.id)}
-                        className="p-2 glass-inner rounded-xl cursor-pointer flex items-center gap-2">
-                        <span className="text-sm">{'\u{1F4CD}'}</span>
-                        <span className="text-xs text-paper">{l.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
-            </div>
-
-            {/* MIDDLE: Conversation + Contacts */}
-            <div className="col-span-4 space-y-4">
-              <Card title="Conversation" noPadding>
-                <div className="h-[500px]">
-                  <ConversationTimeline subjectType="ticket" subjectId={ticketId} profile={profile} contacts={[]} ticket={ticket} />
-                </div>
-              </Card>
-
-              <Card title="Contacts">
-                <AssociationManager subjectType="ticket" subjectId={ticketId} targetType="contact" profile={profile} onNavigate={onNavigate} />
-              </Card>
-            </div>
-
-            {/* RIGHT: Attachments + Projects + Stage History */}
-            <div className="col-span-4 space-y-4">
               <AttachmentsCard subjectType="ticket" subjectId={ticketId} profile={profile} />
 
               <Card title="Projects" count={projects.length}
@@ -491,12 +491,12 @@ export default function TicketDetail({ ticketId, profile, onClose, onNavigate })
 function Card({ title, count, action, noPadding, children }) {
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-bdr flex items-center gap-2">
-        <h3 className="text-sm font-bold text-paper">{title}</h3>
+      <div className="px-5 py-3.5 border-b border-bdr flex items-center gap-2">
+        <h3 className="text-[13px] font-bold text-paper tracking-tight">{title}</h3>
         {count !== undefined && <span className="text-xs text-dim font-mono">({count})</span>}
         {action && <button onClick={action.onClick} className="ml-auto text-xs text-ember hover:text-ember-deep font-medium">{action.label}</button>}
       </div>
-      <div className={noPadding ? '' : 'p-4'}>{children}</div>
+      <div className={noPadding ? '' : 'p-5'}>{children}</div>
     </div>
   );
 }
