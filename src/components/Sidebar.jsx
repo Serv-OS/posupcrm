@@ -23,12 +23,9 @@ const COLLAPSIBLE = [
   { id: 'product', label: 'Product', items: [
     ['modules', 'Modules', LayoutGrid], ['feature_requests', 'Feature Requests', Sparkles], ['releases', 'Releases', Flag],
   ] },
-  { id: 'staffing', label: 'Staffing', items: [
-    ['schedule', 'Schedule', Calendar], ['timeoff', 'Time Off', Plane],
-    ['staff', 'Staff', User], ['departments', 'Departments & Areas', Building2],
-  ] },
   { id: 'workforce', label: 'Workforce', items: [
-    ['time', 'Time Tracking', Clock],
+    ['time', 'Time Tracking', Clock], ['schedule', 'Schedule', Calendar], ['timeoff', 'Time Off', Plane],
+    ['staff', 'Staff', User], ['departments', 'Departments & Areas', Building2],
   ] },
   { id: 'insights', label: 'Insights', items: [
     ['reporting', 'Reporting', BarChart3],
@@ -46,7 +43,7 @@ const ACTIVE_MAP = {
   release_detail: 'releases',
 };
 
-const DEFAULT_GROUPS = { appbuild: false, sales: true, delivery: false, support: false, product: false, staffing: false, workforce: false, insights: false };
+const DEFAULT_GROUPS = { appbuild: false, sales: true, delivery: false, support: false, product: false, workforce: false, insights: false };
 
 export default function Sidebar({ profile, projects, activeProject, setActiveProject, view, setView, onSignOut, onRefresh, theme }) {
   const [logos, setLogos] = useState({ light: null, dark: null });
