@@ -73,8 +73,7 @@ export default function ContactList({ profile, onSelect }) {
   const getCompanyNames = (contactId) =>
     linkedIds(contactId, 'company').map(id => companies.find(c => c.id === id)?.name).filter(Boolean).join(', ');
 
-  const getLocationNames = (contactId) =>
-    linkedIds(contactId, 'location').map(id => locations.find(l => l.id === id)?.name).filter(Boolean).join(', ');
+  const locationCount = (contactId) => linkedIds(contactId, 'location').length;
 
   const blank = { first_name: '', last_name: '', email: '', phone: '', job_title: '', company_id: '', source: '', notes: '' };
   const [showCreate, setShowCreate] = useState(false);
@@ -166,7 +165,9 @@ export default function ContactList({ profile, onSelect }) {
                 <Chip icon={'\u{1F4E7}'}>{c.email}</Chip>
                 <Chip icon={'\u{1F4F1}'}>{c.phone}</Chip>
                 <Chip tone="slate" icon={'\u{1F3E2}'}>{getCompanyNames(c.id)}</Chip>
-                <Chip tone="slate" icon={'\u{1F4CD}'}>{getLocationNames(c.id)}</Chip>
+                {locationCount(c.id) > 0 && (
+                  <Chip tone="slate" icon={'\u{1F4CD}'}>{locationCount(c.id)} location{locationCount(c.id) !== 1 ? 's' : ''}</Chip>
+                )}
               </ChipRow>
             </RecordCard>
           );
