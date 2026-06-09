@@ -60,7 +60,8 @@ export default function LocationList({ profile, onSelect, onNavigate }) {
       supabase.from('locations').select('*').order('name'),
       supabase.from('companies').select('id, name'),
       supabase.from('leads').select('id, location_id, stage, name'),
-      supabase.from('associations').select('*').eq('to_type', 'location').eq('from_type', 'contact'),
+      supabase.from('associations').select('*')
+        .or('and(from_type.eq.contact,to_type.eq.location),and(from_type.eq.location,to_type.eq.contact)'),
       supabase.from('contacts').select('id, first_name, last_name'),
     ]);
     setLocations(l.data || []);
@@ -72,10 +73,17 @@ export default function LocationList({ profile, onSelect, onNavigate }) {
   };
 
   const leadFor = (locationId) => primaryLead(leads.filter(l => l.location_id === locationId));
-  const contactNames = (locationId) => associations
-    .filter(a => a.to_id === locationId)
-    .map(a => { const c = contacts.find(x => x.id === a.from_id); return c ? [c.first_name, c.last_name].filter(Boolean).join(' ') : null; })
-    .filter(Boolean).join(', ');
+  const contactNames = (locationId) => {
+    const ids = new Set();
+    for (const a of associations) {
+      // association may be stored either direction: contact↔location
+      if (a.from_type === 'location' && a.from_id === locationId && a.to_type === 'contact') ids.add(a.to_id);
+      else if (a.to_type === 'location' && a.to_id === locationId && a.from_type === 'contact') ids.add(a.from_id);
+    }
+    return [...ids]
+      .map(id => { const c = contacts.find(x => x.id === id); return c ? [c.first_name, c.last_name].filter(Boolean).join(' ') : null; })
+      .filter(Boolean).join(', ');
+  };
 
   const filtered = useMemo(() => {
     let result = locations;
