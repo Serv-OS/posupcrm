@@ -4,7 +4,27 @@ import { CreditCard, Plus, X, TrendingUp, Banknote } from 'lucide-react';
 import ProcessingAccountDrawer from './ProcessingAccountDrawer.jsx';
 
 export const gbp0 = (n) => '£' + (Number(n) || 0).toLocaleString('en-GB', { maximumFractionDigits: 0 });
-export const marginPct = (a) => Number(a.our_rate_pct || 0) - Number(a.buy_rate_pct || 0);
+
+// Card scheme × presentment categories
+export const RATE_CATEGORIES = [
+  { key: 'visa_mc_cp', label: 'Visa / Mastercard — Card present' },
+  { key: 'visa_mc_cnp', label: 'Visa / Mastercard — Card not present' },
+  { key: 'amex_cp', label: 'Amex — Card present' },
+  { key: 'amex_cnp', label: 'Amex — Card not present' },
+];
+
+// Blended (averaged) value of a per-category rate field across defined lines.
+// Falls back to the legacy account-level field when no category rates exist.
+export const blendedRate = (a, field) => {
+  const rows = (a.rates || []).filter(r => r[field] != null && r[field] !== '');
+  if (rows.length) return rows.reduce((s, r) => s + Number(r[field]), 0) / rows.length;
+  return a[field] != null ? Number(a[field]) : null;
+};
+export const marginPct = (a) => {
+  const rows = (a.rates || []).filter(r => r.our_rate_pct != null && r.buy_rate_pct != null);
+  if (rows.length) return rows.reduce((s, r) => s + (Number(r.our_rate_pct) - Number(r.buy_rate_pct)), 0) / rows.length;
+  return Number(a.our_rate_pct || 0) - Number(a.buy_rate_pct || 0);
+};
 export const marginTxn = (a) => Number(a.our_txn_fee || 0) - Number(a.buy_txn_fee || 0);
 export const revenueOf = (a, v) =>
   v.our_revenue != null ? Number(v.our_revenue)
@@ -27,13 +47,16 @@ export default function PaymentsPanel({ profile, onNavigate }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [a, v, c, l] = await Promise.all([
+    const [a, v, c, l, r] = await Promise.all([
       supabase.from('processing_accounts').select('*, company:companies(name), location:locations(name)').order('created_at', { ascending: false }),
       supabase.from('processing_volumes').select('*'),
       supabase.from('companies').select('id, name').order('name'),
       supabase.from('locations').select('id, name, company_id').order('name'),
+      supabase.from('processing_rates').select('*'),
     ]);
-    setAccounts(a.data || []); setVolumes(v.data || []); setCompanies(c.data || []); setLocations(l.data || []);
+    const rates = r.data || [];
+    const accts = (a.data || []).map(acc => ({ ...acc, rates: rates.filter(x => x.account_id === acc.id) }));
+    setAccounts(accts); setVolumes(v.data || []); setCompanies(c.data || []); setLocations(l.data || []);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -110,8 +133,8 @@ export default function PaymentsPanel({ profile, onNavigate }) {
                             {a.location?.name && a.company?.name && <div className="text-[11px] text-dim">{a.company.name}</div>}
                           </td>
                           <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg ${STATUS_STYLE[a.status]}`}>{a.status}</span></td>
-                          <td className="px-3 py-2.5 text-right tabular-nums text-muted">{a.current_rate_pct != null ? `${a.current_rate_pct}%` : '—'}</td>
-                          <td className="px-3 py-2.5 text-right tabular-nums text-paper">{a.our_rate_pct != null ? `${a.our_rate_pct}%` : '—'}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-muted">{blendedRate(a, 'current_rate_pct') != null ? `${blendedRate(a, 'current_rate_pct').toFixed(2)}%` : '—'}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-paper">{blendedRate(a, 'our_rate_pct') != null ? `${blendedRate(a, 'our_rate_pct').toFixed(2)}%` : '—'}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-emerald-600 font-semibold">{marginPct(a).toFixed(2)}%</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-paper">{v ? gbp0(v.amount_processed) : '—'}</td>
                           <td className="px-5 py-2.5 text-right tabular-nums font-semibold text-paper">{v ? gbp0(revenueOf(a, v)) : '—'}</td>
@@ -150,37 +173,68 @@ function Headline({ icon, value, label, sub, accent }) {
 const input = "w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper focus:outline-none focus:border-ember";
 const label = "text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block";
 
+const emptyRates = () => Object.fromEntries(RATE_CATEGORIES.map(c => [c.key, { current_rate_pct: '', our_rate_pct: '', buy_rate_pct: '' }]));
+
 export function AccountModal({ account, companies, locations, onClose, onSaved }) {
   const a = account || {};
   const [f, setF] = useState({
     company_id: a.company_id || '', location_id: a.location_id || '', label: a.label || '', status: a.status || 'prospect',
-    current_rate_pct: a.current_rate_pct ?? '', current_txn_fee: a.current_txn_fee ?? '', current_monthly_volume: a.current_monthly_volume ?? '',
-    our_rate_pct: a.our_rate_pct ?? '', our_txn_fee: a.our_txn_fee ?? '',
-    buy_rate_pct: a.buy_rate_pct ?? '', buy_txn_fee: a.buy_txn_fee ?? '',
+    current_monthly_volume: a.current_monthly_volume ?? '',
+    current_txn_fee: a.current_txn_fee ?? '', our_txn_fee: a.our_txn_fee ?? '', buy_txn_fee: a.buy_txn_fee ?? '',
     partner: a.partner || '', merchant_ref: a.merchant_ref || '',
   });
+  const [rates, setRates] = useState(emptyRates());
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const setRate = (cat, field, v) => setRates(p => ({ ...p, [cat]: { ...p[cat], [field]: v } }));
   const num = (v) => v === '' || v == null ? null : Number(v);
   const locs = locations.filter(l => l.company_id === f.company_id);
+
+  useEffect(() => {
+    if (!a.id) return;
+    supabase.from('processing_rates').select('*').eq('account_id', a.id).then(({ data }) => {
+      if (!data?.length) return;
+      setRates(prev => {
+        const next = { ...prev };
+        data.forEach(r => { next[r.category] = { current_rate_pct: r.current_rate_pct ?? '', our_rate_pct: r.our_rate_pct ?? '', buy_rate_pct: r.buy_rate_pct ?? '' }; });
+        return next;
+      });
+    });
+  }, [a.id]);
 
   const save = async () => {
     if (!f.company_id) { alert('Pick a customer (company)'); return; }
     const row = {
       company_id: f.company_id, location_id: f.location_id || null, label: f.label.trim() || null, status: f.status,
-      current_rate_pct: num(f.current_rate_pct), current_txn_fee: num(f.current_txn_fee), current_monthly_volume: num(f.current_monthly_volume),
-      our_rate_pct: num(f.our_rate_pct), our_txn_fee: num(f.our_txn_fee),
-      buy_rate_pct: num(f.buy_rate_pct), buy_txn_fee: num(f.buy_txn_fee),
+      current_monthly_volume: num(f.current_monthly_volume),
+      current_txn_fee: num(f.current_txn_fee), our_txn_fee: num(f.our_txn_fee), buy_txn_fee: num(f.buy_txn_fee),
       partner: f.partner.trim() || null, merchant_ref: f.merchant_ref.trim() || null, updated_at: new Date().toISOString(),
     };
+    let accId = a.id;
     if (a.id) await supabase.from('processing_accounts').update(row).eq('id', a.id);
-    else await supabase.from('processing_accounts').insert(row);
+    else { const { data } = await supabase.from('processing_accounts').insert(row).select('id').single(); accId = data?.id; }
+    if (accId) {
+      for (const c of RATE_CATEGORIES) {
+        const r = rates[c.key];
+        const has = [r.current_rate_pct, r.our_rate_pct, r.buy_rate_pct].some(v => v !== '' && v != null);
+        if (has) {
+          await supabase.from('processing_rates').upsert({
+            account_id: accId, category: c.key,
+            current_rate_pct: num(r.current_rate_pct), our_rate_pct: num(r.our_rate_pct), buy_rate_pct: num(r.buy_rate_pct),
+          }, { onConflict: 'account_id,category' });
+        } else {
+          await supabase.from('processing_rates').delete().eq('account_id', accId).eq('category', c.key);
+        }
+      }
+    }
     onSaved();
   };
 
+  const cell = "w-full px-2 py-1.5 bg-card border border-bdr rounded-lg text-sm text-paper text-right focus:outline-none focus:border-ember";
+
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="glass-card rounded-2xl w-full max-w-lg max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-4 border-b border-bdr flex items-center justify-between sticky top-0 glass-card">
+      <div className="glass-card rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-bdr flex items-center justify-between sticky top-0 glass-card z-10">
           <div className="text-base font-bold text-paper">{a.id ? 'Edit account' : 'New processing account'}</div>
           <button onClick={onClose} className="text-muted hover:text-paper"><X size={18} /></button>
         </div>
@@ -201,19 +255,45 @@ export function AccountModal({ account, companies, locations, onClose, onSaved }
               <option value="prospect">Prospect</option><option value="live">Live</option><option value="churned">Churned</option></select></div>
           </div>
 
-          <Group title="What they pay now">
-            <Three a={['current_rate_pct', 'Rate %', '1.75']} b={['current_txn_fee', 'Per txn £', '0.05']} c={['current_monthly_volume', 'Monthly volume £', '40000']} f={f} set={set} />
+          {/* Per-category rate grid: scheme × presentment */}
+          <Group title="Processing rates by card type">
+            <table className="w-full">
+              <thead>
+                <tr className="text-[10px] font-mono font-bold uppercase tracking-[0.12em] text-dim">
+                  <th className="text-left font-bold pb-1.5">Card type</th>
+                  <th className="font-bold pb-1.5 px-1">Their %</th>
+                  <th className="font-bold pb-1.5 px-1">Our %</th>
+                  <th className="font-bold pb-1.5 px-1">Buy %</th>
+                  <th className="font-bold pb-1.5 pl-2 text-right">Margin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {RATE_CATEGORIES.map(c => {
+                  const r = rates[c.key];
+                  const m = Number(r.our_rate_pct || 0) - Number(r.buy_rate_pct || 0);
+                  const [scheme, present] = c.label.split(' — ');
+                  return (
+                    <tr key={c.key}>
+                      <td className="py-1 pr-2"><div className="text-sm text-paper leading-tight">{scheme}</div><div className="text-[10px] text-dim">{present}</div></td>
+                      <td className="px-1"><input className={cell} value={r.current_rate_pct} onChange={e => setRate(c.key, 'current_rate_pct', e.target.value)} placeholder="—" /></td>
+                      <td className="px-1"><input className={cell} value={r.our_rate_pct} onChange={e => setRate(c.key, 'our_rate_pct', e.target.value)} placeholder="—" /></td>
+                      <td className="px-1"><input className={cell} value={r.buy_rate_pct} onChange={e => setRate(c.key, 'buy_rate_pct', e.target.value)} placeholder="—" /></td>
+                      <td className="pl-2 text-right text-sm font-semibold tabular-nums text-emerald-600">{m.toFixed(2)}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </Group>
-          <Group title="What we charge them">
-            <Two a={['our_rate_pct', 'Rate %', '1.45']} b={['our_txn_fee', 'Per txn £', '0.03']} f={f} set={set} />
+
+          <Group title="Per-transaction fees (£) — all card types">
+            <Three a={['current_txn_fee', 'Their / txn', '0.05']} b={['our_txn_fee', 'Our / txn', '0.03']} c={['buy_txn_fee', 'Buy / txn', '0.02']} f={f} set={set} />
           </Group>
-          <Group title="Our cost (buy rate)">
-            <Two a={['buy_rate_pct', 'Rate %', '1.10']} b={['buy_txn_fee', 'Per txn £', '0.02']} f={f} set={set} />
-            <div className="text-[11px] text-emerald-600 font-semibold mt-1">Margin: {(Number(f.our_rate_pct || 0) - Number(f.buy_rate_pct || 0)).toFixed(2)}% + £{(Number(f.our_txn_fee || 0) - Number(f.buy_txn_fee || 0)).toFixed(2)}/txn</div>
-          </Group>
-          <div className="grid grid-cols-2 gap-3">
+
+          <div className="grid grid-cols-3 gap-3">
+            <div><label className={label}>Monthly volume £</label><input className={input} value={f.current_monthly_volume} onChange={e => set('current_monthly_volume', e.target.value)} placeholder="40000" /></div>
             <div><label className={label}>Processing partner</label><input className={input} value={f.partner} onChange={e => set('partner', e.target.value)} placeholder="e.g. Adyen" /></div>
-            <div><label className={label}>Merchant ref</label><input className={input} value={f.merchant_ref} onChange={e => set('merchant_ref', e.target.value)} placeholder="MID / external id" /></div>
+            <div><label className={label}>Merchant ref</label><input className={input} value={f.merchant_ref} onChange={e => set('merchant_ref', e.target.value)} placeholder="MID" /></div>
           </div>
 
           <div className="flex gap-2 pt-1"><button onClick={save} className="btn-glass px-5 py-2 rounded-xl text-sm font-semibold">Save</button>

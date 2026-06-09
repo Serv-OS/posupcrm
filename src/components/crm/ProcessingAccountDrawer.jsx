@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { X, Pencil, Plus, Trash2, Building2 } from 'lucide-react';
-import { AccountModal, gbp0, marginPct, marginTxn, revenueOf } from './PaymentsPanel.jsx';
+import { AccountModal, gbp0, marginPct, marginTxn, revenueOf, blendedRate, RATE_CATEGORIES } from './PaymentsPanel.jsx';
 
 const gbp2 = (n) => '£' + (Number(n) || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
@@ -15,24 +15,35 @@ export default function ProcessingAccountDrawer({ account, profile, onClose, onC
   const [vform, setVform] = useState({ month: thisMonth(), amount_processed: '', transactions: '', our_revenue: '' });
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
+  const [rates, setRates] = useState([]);
+
   const loadVolumes = async () => {
     const { data } = await supabase.from('processing_volumes').select('*').eq('account_id', acc.id).order('period', { ascending: false });
     setVolumes(data || []);
   };
+  const loadRates = async () => {
+    const { data } = await supabase.from('processing_rates').select('*').eq('account_id', acc.id);
+    setRates(data || []);
+  };
   const reloadAcc = async () => {
     const { data } = await supabase.from('processing_accounts').select('*, company:companies(name), location:locations(name)').eq('id', acc.id).maybeSingle();
     if (data) setAcc(data);
+    loadRates();
   };
-  useEffect(() => { loadVolumes(); }, [acc.id]);
+  useEffect(() => { loadVolumes(); loadRates(); }, [acc.id]);
 
+  // account enriched with its per-category rate lines for all calcs
+  const accCalc = { ...acc, rates };
   const name = acc.label || acc.location?.name || acc.company?.name || 'Account';
 
-  // rate comparison on their stated monthly volume
+  // rate comparison on their stated monthly volume (blended across card types)
   const refVol = Number(acc.current_monthly_volume || 0);
-  const theirCost = refVol * Number(acc.current_rate_pct || 0) / 100;
-  const ourCharge = refVol * Number(acc.our_rate_pct || 0) / 100;
+  const blendedCurrent = blendedRate(accCalc, 'current_rate_pct') || 0;
+  const blendedOur = blendedRate(accCalc, 'our_rate_pct') || 0;
+  const theirCost = refVol * blendedCurrent / 100;
+  const ourCharge = refVol * blendedOur / 100;
   const saving = theirCost - ourCharge;
-  const ourMonthlyRev = refVol * marginPct(acc) / 100;
+  const ourMonthlyRev = refVol * marginPct(accCalc) / 100;
 
   const addVolume = async () => {
     const amount = Number(vform.amount_processed);
@@ -73,15 +84,32 @@ export default function ProcessingAccountDrawer({ account, profile, onClose, onC
         </div>
 
         <div className="p-6 space-y-5">
-          {/* Rate comparison */}
-          <div className="grid grid-cols-2 gap-3">
-            <RateCard title="They pay now" rate={acc.current_rate_pct} txn={acc.current_txn_fee} muted />
-            <RateCard title="We charge" rate={acc.our_rate_pct} txn={acc.our_txn_fee} />
+          {/* Rates by card type */}
+          <div className="glass-inner rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-bdr text-[10px] font-mono font-bold uppercase tracking-[0.14em] text-dim flex">
+              <span className="flex-1">Card type</span><span className="w-14 text-right">Their</span><span className="w-14 text-right">Our</span><span className="w-14 text-right">Buy</span><span className="w-16 text-right">Margin</span>
+            </div>
+            {RATE_CATEGORIES.map(c => {
+              const r = rates.find(x => x.category === c.key) || {};
+              const m = (r.our_rate_pct != null && r.buy_rate_pct != null) ? (Number(r.our_rate_pct) - Number(r.buy_rate_pct)) : null;
+              const [scheme, present] = c.label.split(' — ');
+              const pct = (v) => v != null ? `${Number(v).toFixed(2)}%` : '—';
+              return (
+                <div key={c.key} className="px-4 py-2 border-b border-bdr/50 last:border-0 flex items-center text-sm">
+                  <div className="flex-1 min-w-0"><div className="text-paper leading-tight">{scheme}</div><div className="text-[10px] text-dim">{present}</div></div>
+                  <span className="w-14 text-right tabular-nums text-muted">{pct(r.current_rate_pct)}</span>
+                  <span className="w-14 text-right tabular-nums text-paper">{pct(r.our_rate_pct)}</span>
+                  <span className="w-14 text-right tabular-nums text-dim">{pct(r.buy_rate_pct)}</span>
+                  <span className="w-16 text-right tabular-nums font-semibold text-emerald-600">{m != null ? `${m.toFixed(2)}%` : '—'}</span>
+                </div>
+              );
+            })}
+            <div className="px-4 py-2 text-[11px] text-muted">Per-txn fees: their £{Number(acc.current_txn_fee || 0).toFixed(2)} · our £{Number(acc.our_txn_fee || 0).toFixed(2)} · buy £{Number(acc.buy_txn_fee || 0).toFixed(2)}</div>
           </div>
 
           <div className="glass-inner rounded-xl p-4 grid grid-cols-3 gap-3 text-center">
             <Metric value={refVol ? gbp0(saving) : '—'} label="Customer saves / mo" tone={saving >= 0 ? 'emerald' : 'red'} />
-            <Metric value={`${marginPct(acc).toFixed(2)}%`} label="Our margin" tone="emerald" />
+            <Metric value={`${marginPct(accCalc).toFixed(2)}%`} label="Blended margin" tone="emerald" />
             <Metric value={refVol ? gbp0(ourMonthlyRev) : '—'} label="Our rev (est) / mo" />
           </div>
           {!refVol && <div className="text-[11px] text-dim -mt-2">Add their monthly volume to estimate savings & revenue.</div>}
@@ -126,7 +154,7 @@ export default function ProcessingAccountDrawer({ account, profile, onClose, onC
                         <td className="px-4 py-2.5 text-paper">{periodLabel(v.period)}{v.source === 'partner' && <span className="ml-1 text-[9px] text-emerald-600 uppercase">auto</span>}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-paper">{gbp0(v.amount_processed)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-muted">{v.transactions ?? '—'}</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-paper">{gbp2(revenueOf(acc, v))}{est && <span className="text-[9px] text-dim ml-1">est</span>}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-paper">{gbp2(revenueOf(accCalc, v))}{est && <span className="text-[9px] text-dim ml-1">est</span>}</td>
                         <td className="px-2">{canWrite && <button onClick={() => delVolume(v.id)} className="text-dim hover:text-red-600"><Trash2 size={13} /></button>}</td>
                       </tr>
                     );
@@ -135,7 +163,7 @@ export default function ProcessingAccountDrawer({ account, profile, onClose, onC
             </table>
           </div>
 
-          <div className="text-[11px] text-dim">Leave “Our revenue” blank and it’s estimated from your margin ({marginPct(acc).toFixed(2)}% + £{marginTxn(acc).toFixed(2)}/txn). When your processing partner is connected, monthly figures will sync here automatically.</div>
+          <div className="text-[11px] text-dim">Leave “Our revenue” blank and it’s estimated from your blended margin ({marginPct(accCalc).toFixed(2)}% + £{marginTxn(accCalc).toFixed(2)}/txn). When your processing partner is connected, monthly figures will sync here automatically.</div>
         </div>
       </div>
 
@@ -145,15 +173,6 @@ export default function ProcessingAccountDrawer({ account, profile, onClose, onC
   );
 }
 
-function RateCard({ title, rate, txn, muted }) {
-  return (
-    <div className={`rounded-xl p-3 border ${muted ? 'border-bdr bg-card/40' : 'border-ember/30 bg-ember/5'}`}>
-      <div className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1">{title}</div>
-      <div className="text-xl font-bold text-paper tabular-nums">{rate != null ? `${rate}%` : '—'}</div>
-      <div className="text-[11px] text-muted">+ £{Number(txn || 0).toFixed(2)} / txn</div>
-    </div>
-  );
-}
 function Metric({ value, label, tone }) {
   const color = tone === 'emerald' ? 'text-emerald-600' : tone === 'red' ? 'text-red-600' : 'text-paper';
   return <div><div className={`text-lg font-bold tabular-nums ${color}`}>{value}</div><div className="text-[10px] text-dim">{label}</div></div>;
