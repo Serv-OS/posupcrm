@@ -22,7 +22,7 @@ export default function ContactList({ profile, onSelect }) {
     setLoading(true);
     const [c, a, co, ld, loc] = await Promise.all([
       supabase.from('contacts').select('*').order('last_name'),
-      supabase.from('associations').select('*').eq('from_type', 'contact'),
+      supabase.from('associations').select('*').or('from_type.eq.contact,to_type.eq.contact'),
       supabase.from('companies').select('id, name'),
       supabase.from('leads').select('id, contact_id, stage, name'),
       supabase.from('locations').select('id, name'),
@@ -59,21 +59,22 @@ export default function ContactList({ profile, onSelect }) {
     return result;
   }, [contacts, leads, search, leadFilter]);
 
-  const getCompanyNames = (contactId) => {
-    const linked = associations
-      .filter(a => a.from_id === contactId && a.to_type === 'company')
-      .map(a => companies.find(c => c.id === a.to_id)?.name)
-      .filter(Boolean);
-    return linked.join(', ');
+  // Resolve ids of `targetType` linked to a contact, whichever direction the
+  // association is stored (contact↔company / contact↔location).
+  const linkedIds = (contactId, targetType) => {
+    const ids = new Set();
+    for (const a of associations) {
+      if (a.from_type === 'contact' && a.from_id === contactId && a.to_type === targetType) ids.add(a.to_id);
+      else if (a.to_type === 'contact' && a.to_id === contactId && a.from_type === targetType) ids.add(a.from_id);
+    }
+    return [...ids];
   };
 
-  const getLocationNames = (contactId) => {
-    const linked = associations
-      .filter(a => a.from_id === contactId && a.to_type === 'location')
-      .map(a => locations.find(l => l.id === a.to_id)?.name)
-      .filter(Boolean);
-    return linked.join(', ');
-  };
+  const getCompanyNames = (contactId) =>
+    linkedIds(contactId, 'company').map(id => companies.find(c => c.id === id)?.name).filter(Boolean).join(', ');
+
+  const getLocationNames = (contactId) =>
+    linkedIds(contactId, 'location').map(id => locations.find(l => l.id === id)?.name).filter(Boolean).join(', ');
 
   const blank = { first_name: '', last_name: '', email: '', phone: '', job_title: '', company_id: '', source: '', notes: '' };
   const [showCreate, setShowCreate] = useState(false);
