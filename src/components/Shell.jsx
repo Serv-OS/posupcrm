@@ -115,6 +115,7 @@ export default function Shell({ session }) {
     else if (type === 'task') { setView('task_detail'); setDetailId(id); }
     else if (type === 'lead') { if (id) { setView('lead_detail'); setDetailId(id); } else setView('leads'); }
     else if (type === 'quote') { setView('quote_detail'); setDetailId(id); }
+    else if (type === 'processing') { setView('processing'); }
     else if (type === 'account') { setView('account'); }
     else if (type === 'inbox') { setView('inbox'); }
     else if (type === 'calendar') { setView('calendar'); }

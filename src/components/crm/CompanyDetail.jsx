@@ -5,6 +5,7 @@ import ActivityTimeline from './ActivityTimeline.jsx';
 import CallButton from '../CallButton.jsx';
 import LeadBadge from './LeadBadge.jsx';
 import LeadsCard from './LeadsCard.jsx';
+import ProcessingRatesCard from './ProcessingRatesCard.jsx';
 import { primaryLead } from '../../lib/leadStages';
 
 const STATUS_COLORS = {
@@ -207,6 +208,8 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate,
             <div className="col-span-4 space-y-4">
 
               <LeadsCard leads={leads} />
+
+              <ProcessingRatesCard companyId={companyId} onNavigate={onNavigate} />
 
               <Card title="Deals" count={deals.length}>
                 {deals.length > 0 ? (

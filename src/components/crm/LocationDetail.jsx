@@ -5,6 +5,7 @@ import ActivityTimeline from './ActivityTimeline.jsx';
 import CallButton from '../CallButton.jsx';
 import LeadBadge from './LeadBadge.jsx';
 import LeadsCard from './LeadsCard.jsx';
+import ProcessingRatesCard from './ProcessingRatesCard.jsx';
 import { primaryLead } from '../../lib/leadStages';
 
 const STATUS_OPTIONS = ['prospect', 'onboarding', 'live', 'churned'];
@@ -216,6 +217,8 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
                   </div>
                 ) : <Empty>No modules enabled</Empty>}
               </Card>
+
+              <ProcessingRatesCard locationId={locationId} onNavigate={onNavigate} />
             </div>
 
             {/* MIDDLE: Activity + Contacts */}
