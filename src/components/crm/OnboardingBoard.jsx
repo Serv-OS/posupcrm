@@ -20,6 +20,7 @@ export default function OnboardingBoard({ profile, onSelectOnboarding, onNavigat
   const [assocs, setAssocs] = useState([]);
   const [members, setMembers] = useState([]);
   const [dragItem, setDragItem] = useState(null);
+  const [search, setSearch] = useState('');
 
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
@@ -58,11 +59,20 @@ export default function OnboardingBoard({ profile, onSelectOnboarding, onNavigat
   const fmtDT = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
 
   const byStage = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const match = (o) => {
+      if (!q) return true;
+      const co = companies.find(c => c.id === o.company_id)?.name || '';
+      const loc = o.location_id ? (locations.find(l => l.id === o.location_id)?.name || '') : '';
+      const m = members.find(u => u.id === o.owner_id);
+      const own = m ? (m.display_name || m.email) : '';
+      return [co, loc, own].some(s => s.toLowerCase().includes(q));
+    };
     const map = {};
     STAGES.forEach(s => { map[s.key] = []; });
-    onboardings.forEach(o => { if (map[o.stage]) map[o.stage].push(o); });
+    onboardings.filter(match).forEach(o => { if (map[o.stage]) map[o.stage].push(o); });
     return map;
-  }, [onboardings]);
+  }, [onboardings, search, companies, locations, members]);
 
   const companyName = (id) => companies.find(c => c.id === id)?.name || '';
   const ownerName = (id) => {
@@ -90,11 +100,15 @@ export default function OnboardingBoard({ profile, onSelectOnboarding, onNavigat
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-6 py-4 border-b border-bdr">
-        <div className="text-lg font-bold text-paper">Onboarding Pipeline</div>
-        <div className="text-[10px] text-dim font-mono uppercase tracking-[0.18em]">
-          {onboardings.length} onboardings / {onboardings.filter(o => o.stage === 'live').length} live
+      <div className="px-6 py-4 border-b border-bdr flex items-center gap-4 flex-wrap">
+        <div>
+          <div className="text-lg font-bold text-paper">Onboarding Pipeline</div>
+          <div className="text-[10px] text-dim font-mono uppercase tracking-[0.18em]">
+            {onboardings.length} onboardings / {onboardings.filter(o => o.stage === 'live').length} live
+          </div>
         </div>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company, location or owner…"
+          className="ml-auto w-full sm:w-72 px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember" />
       </div>
 
       <div className="flex-1 overflow-x-auto overflow-y-hidden">
