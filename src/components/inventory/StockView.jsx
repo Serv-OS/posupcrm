@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Boxes, Search, X, Undo2, Send } from 'lucide-react';
-import { CONDITIONS, recallToServicing, resolveServicing, dispatchRmaTl, thresholdFor, fmtGBP, csvExport, norm } from '../../lib/inventoryOps';
+import { Boxes, Search, X, Undo2, Send, Pencil, Trash2, PoundSterling } from 'lucide-react';
+import { CONDITIONS, recallToServicing, resolveServicing, dispatchRmaTl, thresholdFor, fmtGBP, csvExport, norm, setProductCost, renameSerial, deleteSerial } from '../../lib/inventoryOps';
 
 const input = "px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember";
 const STATUS_BADGE = {
@@ -22,6 +22,9 @@ export default function StockView({ profile, onNavigate }) {
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('all');
   const [lookup, setLookup] = useState(null); // serial row + history
+  const [histType, setHistType] = useState('all');
+  const [histFrom, setHistFrom] = useState('');
+  const [histTo, setHistTo] = useState('');
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
   useEffect(() => { load(); }, []);
@@ -49,7 +52,7 @@ export default function StockView({ profile, onNavigate }) {
 
   const holding = filterRows(serialRows.filter(r => ['in_stock', 'staged', 'in_transit'].includes(r.status)));
   const deployed = filterRows(serialRows.filter(r => r.status === 'deployed'));
-  const servicing = filterRows(serialRows.filter(r => r.status === 'servicing'));
+  const servicing = filterRows(serialRows.filter(r => r.status === 'servicing' || (r.status === 'in_stock' && r.condition === 'needs-testing')));
   const rmaRows = filterRows(serialRows.filter(r => ['rma', 'total_loss'].includes(r.status)));
   const writtenOff = filterRows(serialRows.filter(r => r.status === 'written_off'));
 
@@ -86,8 +89,24 @@ export default function StockView({ profile, onNavigate }) {
     catch (e) { alert(e.message); }
   };
   const doResolve = async (r, outcome) => {
-    try { await resolveServicing({ serial: r.serial, outcome, warehouse: r.warehouse_id || warehouses[0]?.id, testedBy: profile.display_name || profile.email }); load(); }
+    const notes = outcome === 'pass' ? (prompt('Test notes (optional):') ?? '') : (prompt('Fault notes (optional):') ?? '');
+    try { await resolveServicing({ serial: r.serial, outcome, warehouse: r.warehouse_id || warehouses[0]?.id, testedBy: profile.display_name || profile.email, notes }); load(); }
     catch (e) { alert(e.message); }
+  };
+  const doSetCost = async (r) => {
+    const v = prompt(`Unit cost for ALL "${r.product_name}" serials (current ${r.cost ?? '—'}):`);
+    if (v === null) return;
+    await setProductCost(r.product_name, v === '' ? null : Number(v));
+    load();
+  };
+  const doRename = async (r) => {
+    const v = prompt(`Rename serial ${r.serial} to:`, r.serial);
+    if (!v || norm(v) === r.serial) return;
+    try { await renameSerial(r.serial, v); load(); } catch (e) { alert(e.message); }
+  };
+  const doDelete = async (r) => {
+    if (!confirm(`Delete serial ${r.serial} from the system?\n\nMovement history is kept for audit, but the unit leaves stock entirely.`)) return;
+    try { await deleteSerial(r.serial); load(); } catch (e) { alert(e.message); }
   };
   const doRmaDispatch = async (r) => {
     const type = r.status === 'total_loss' ? 'tl' : 'rma';
@@ -154,7 +173,12 @@ export default function StockView({ profile, onNavigate }) {
                   {byProduct.length === 0 && <div className="px-5 py-6 text-sm text-dim italic col-span-3 text-center">Nothing in stock yet — receive goods via Stock In.</div>}
                 </div>
               </div>
-              <SerialTable rows={holding} onLookup={openLookup} cols={['warehouse', 'condition', 'cost', 'po']} />
+              <SerialTable rows={holding} onLookup={openLookup} cols={['warehouse', 'condition', 'cost', 'po']}
+                actions={canWrite ? [
+                  (r) => <button key="c" onClick={() => doSetCost(r)} title="Set cost (all of this product)" className="text-dim hover:text-ember"><PoundSterling size={13} /></button>,
+                  (r) => <button key="e" onClick={() => doRename(r)} title="Rename serial" className="text-dim hover:text-paper"><Pencil size={13} /></button>,
+                  (r) => <button key="d" onClick={() => doDelete(r)} title="Delete serial" className="text-dim hover:text-red-600"><Trash2 size={13} /></button>,
+                ] : []} />
             </>
           )}
 
@@ -184,10 +208,31 @@ export default function StockView({ profile, onNavigate }) {
             </>
           )}
 
-          {tab === 'history' && (
+          {tab === 'history' && (() => {
+            const histRows = movements.filter(m => {
+              if (histType !== 'all' && m.type !== histType) return false;
+              if (histFrom && m.occurred_at.slice(0, 10) < histFrom) return false;
+              if (histTo && m.occurred_at.slice(0, 10) > histTo) return false;
+              if (!search) return true;
+              return m.serials.some(x => x.includes(norm(search))) || m.product_name.toLowerCase().includes(search.toLowerCase()) || (m.customer_name || '').toLowerCase().includes(search.toLowerCase());
+            });
+            return (
             <div className="glass-card rounded-2xl overflow-hidden">
+              <div className="px-5 py-3 border-b border-bdr flex items-center gap-2 flex-wrap">
+                <select className={input} value={histType} onChange={e => setHistType(e.target.value)}>
+                  <option value="all">All types</option>
+                  {['in', 'out', 'recall', 'rma_out', 'writeoff'].map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
+                </select>
+                <input type="date" className={input} value={histFrom} onChange={e => setHistFrom(e.target.value)} />
+                <span className="text-dim text-xs">to</span>
+                <input type="date" className={input} value={histTo} onChange={e => setHistTo(e.target.value)} />
+                <button onClick={() => csvExport(histRows.map(m => ({
+                  date: m.occurred_at, type: m.type, product: m.product_name, qty: m.qty,
+                  serials: m.serials.join(' '), customer: m.customer_name || '', supplier: m.supplier_name || '', po: m.po_number || '', by: m.by_name || '',
+                })), 'movement-history.csv')} className="btn-ghost px-3 py-1.5 rounded-xl text-xs ml-auto">CSV ({histRows.length})</button>
+              </div>
               <div className="divide-y divide-bdr">
-                {movements.filter(m => !search || m.serials.some(s => s.includes(norm(search))) || m.product_name.toLowerCase().includes(search.toLowerCase()) || (m.customer_name || '').toLowerCase().includes(search.toLowerCase())).map(m => (
+                {histRows.map(m => (
                   <div key={m.id} className="px-5 py-2.5 flex items-center gap-3 text-sm">
                     <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 ${
                       m.type === 'in' ? 'bg-emerald-100 text-emerald-700' : m.type === 'out' ? 'bg-purple-100 text-purple-700'
@@ -203,10 +248,11 @@ export default function StockView({ profile, onNavigate }) {
                     <span className="text-xs text-dim shrink-0">{new Date(m.occurred_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                 ))}
-                {movements.length === 0 && <div className="px-5 py-8 text-center text-dim text-sm italic">No movements yet.</div>}
+                {histRows.length === 0 && <div className="px-5 py-8 text-center text-dim text-sm italic">No movements match.</div>}
               </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       </div>
 

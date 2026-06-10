@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { ShoppingCart, Plus, X, Truck, Trash2 } from 'lucide-react';
-import { parseSerials, receiveShipment, fmtGBP } from '../../lib/inventoryOps';
+import { parseSerials, receiveShipment, fmtGBP, shippedByProduct } from '../../lib/inventoryOps';
 
 const input = "w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember";
 const label = "text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block";
@@ -60,28 +60,52 @@ export default function PurchasingView({ profile }) {
           {tab === 'orders' && orders.map(o => {
             const received = o.lines.reduce((s, l) => s + (l.received_qty || 0), 0);
             const total = o.lines.reduce((s, l) => s + l.qty, 0);
+            const shippedMap = shippedByProduct(o, shipments);
+            const shipped = Object.values(shippedMap).reduce((a, b) => a + b, 0);
+            const remaining = total - shipped;
+            const openShipment = shipments.find(sh => sh.order_id === o.id && sh.status === 'in_transit');
+            const displayStatus = (o.status !== 'cancelled' && o.status !== 'received' && remaining <= 0 && openShipment) ? 'in transit' : o.status;
+            const cancelOrder = async () => {
+              if (!confirm(`Cancel ${o.po_number}?`)) return;
+              await supabase.from('inv_orders').update({ status: 'cancelled' }).eq('id', o.id);
+              load();
+            };
             return (
               <div key={o.id} className="glass-card rounded-2xl p-5">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono font-bold text-paper">{o.po_number}</span>
-                  <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${PO_BADGE[o.status]}`}>{o.status}</span>
+                  <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${displayStatus === 'in transit' ? 'bg-blue-100 text-blue-700' : PO_BADGE[o.status]}`}>{displayStatus}</span>
                   <span className="text-sm text-muted">{o.supplier_name}</span>
                   {o.expected_by && <span className="text-xs text-dim">· expected {new Date(o.expected_by).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>}
-                  <span className="text-xs text-dim">· {received}/{total} received</span>
+                  <span className="text-xs text-dim">· {shipped}/{total} shipped · {received}/{total} received</span>
                   <span className="ml-auto text-sm font-semibold text-paper tabular-nums">{fmtGBP(o.total_with_tax)}</span>
-                  {canWrite && o.status !== 'received' && o.status !== 'cancelled' && (
-                    <button onClick={() => setArranging(o)} className="px-3 py-1.5 rounded-xl bg-ember/15 text-ember-deep border border-ember/25 text-xs font-semibold hover:bg-ember/25 flex items-center gap-1"><Truck size={12} /> Arrange shipment</button>
-                  )}
                 </div>
+                {canWrite && o.status !== 'received' && o.status !== 'cancelled' && (
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    {remaining > 0 && (
+                      <button onClick={() => setArranging(o)} className="px-3 py-1.5 rounded-xl bg-ember/15 text-ember-deep border border-ember/25 text-xs font-semibold hover:bg-ember/25 flex items-center gap-1">
+                        <Truck size={12} /> {shipped > 0 ? 'Arrange remaining' : 'Arrange / split shipment'}</button>
+                    )}
+                    {openShipment && (
+                      <button onClick={() => setReceiving(openShipment)} className="px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 text-xs font-semibold hover:bg-emerald-500/25">
+                        Receive (full or part)</button>
+                    )}
+                    {shipped === 0 && <button onClick={cancelOrder} className="px-3 py-1.5 rounded-xl text-red-600 border border-red-200 text-xs font-semibold hover:bg-red-50">Cancel</button>}
+                  </div>
+                )}
                 <div className="mt-2 text-xs text-muted space-y-0.5">
-                  {o.lines.map(l => (
-                    <div key={l.id} className="flex items-center gap-2">
-                      <span className="text-paper">{l.product_name}</span><span>× {l.qty}</span>
-                      <span className="text-dim">@ {fmtGBP(l.unit_cost)} {l.landed_unit_cost != null && l.landed_unit_cost !== l.unit_cost ? `(landed ${fmtGBP(l.landed_unit_cost)})` : ''}</span>
-                      <span className="ml-auto text-dim">{l.received_qty || 0}/{l.qty}</span>
-                    </div>
-                  ))}
-                  {o.tax_amount > 0 && <div className="text-dim">Tax: {fmtGBP(o.tax_amount)}{o.tax_ref ? ` · ${o.tax_ref}` : ''}</div>}
+                  {o.lines.map(l => {
+                    const lShipped = Math.min(shippedMap[l.product_name] || 0, l.qty);
+                    const landedTotal = (l.landed_unit_cost ?? l.unit_cost ?? 0) * l.qty;
+                    return (
+                      <div key={l.id} className="flex items-center gap-2 flex-wrap">
+                        <span className="text-paper">{l.product_name}</span><span>× {l.qty}</span>
+                        <span className="text-dim">@ {fmtGBP(l.unit_cost)}{l.landed_unit_cost != null && l.landed_unit_cost !== l.unit_cost ? ` (landed ${fmtGBP(l.landed_unit_cost)} · ${fmtGBP(landedTotal)} total)` : ''}</span>
+                        <span className="ml-auto text-dim">{lShipped}/{l.qty} shipped · {l.received_qty || 0}/{l.qty} received</span>
+                      </div>
+                    );
+                  })}
+                  {o.tax_amount > 0 && <div className="text-dim">Tax: {fmtGBP(o.tax_amount)}{o.tax_rate ? ` (${o.tax_rate}%)` : ''}{o.tax_ref ? ` · ${o.tax_ref}` : ''} · Total inc tax: {fmtGBP(o.total_with_tax)}</div>}
                 </div>
               </div>
             );
@@ -108,7 +132,7 @@ export default function PurchasingView({ profile }) {
       </div>
 
       {creatingPO && <POModal products={products} suppliers={suppliers} profile={profile} onClose={() => setCreatingPO(false)} onSaved={() => { setCreatingPO(false); load(); }} />}
-      {arranging && <ShipmentModal order={arranging.id ? arranging : null} suppliers={suppliers} products={products} warehouses={warehouses} onClose={() => setArranging(null)} onSaved={() => { setArranging(null); load(); }} />}
+      {arranging && <ShipmentModal order={arranging.id ? arranging : null} suppliers={suppliers} products={products} warehouses={warehouses} allShipments={shipments} onClose={() => setArranging(null)} onSaved={() => { setArranging(null); load(); }} />}
       {receiving && <ReceiveModal shipment={receiving} warehouses={warehouses} profile={profile} onClose={() => setReceiving(null)} onSaved={() => { setReceiving(null); load(); }} />}
       {editSupplier && <SupplierModal supplier={editSupplier} onClose={() => setEditSupplier(null)} onSaved={() => { setEditSupplier(null); load(); }} />}
     </div>
@@ -224,13 +248,14 @@ function POModal({ products, suppliers, profile, onClose, onSaved }) {
 }
 
 // ── Arrange shipment (from a PO or standalone) ───────────────────────────────
-function ShipmentModal({ order, suppliers, products, warehouses, onClose, onSaved }) {
+function ShipmentModal({ order, suppliers, products, warehouses, allShipments, onClose, onSaved }) {
   const [supplierName, setSupplierName] = useState(order?.supplier_name || '');
   const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id || '');
   const [eta, setEta] = useState('');
   const [freight, setFreight] = useState('');
+  const shippedMap = order ? shippedByProduct(order, allShipments || []) : {};
   const [rows, setRows] = useState(order
-    ? order.lines.filter(l => (l.received_qty || 0) < l.qty).map(l => ({ product_id: l.product_id, product_name: l.product_name, category: l.category, qty: l.qty - (l.received_qty || 0), unit_cost: l.landed_unit_cost ?? l.unit_cost ?? '' }))
+    ? order.lines.map(l => ({ product_id: l.product_id, product_name: l.product_name, category: l.category, max: l.qty - Math.min(shippedMap[l.product_name] || 0, l.qty), qty: l.qty - Math.min(shippedMap[l.product_name] || 0, l.qty), unit_cost: l.landed_unit_cost ?? l.unit_cost ?? '' })).filter(r => r.max > 0)
     : [{ product_id: '', product_name: '', category: '', qty: 1, unit_cost: '' }]);
   const [saving, setSaving] = useState(false);
   const set = (i, k, v) => setRows(p => p.map((r, x) => x === i ? { ...r, [k]: v } : r));
@@ -253,6 +278,15 @@ function ShipmentModal({ order, suppliers, products, warehouses, onClose, onSave
         shipment_id: sh.id, product_id: r.product_id || null, product_name: r.product_name, category: r.category || null,
         qty: Number(r.qty), unit_cost: r.unit_cost === '' ? null : +(Number(r.unit_cost) + freightPerUnit).toFixed(4),
       })));
+      // Split shipment: if this doesn't cover everything outstanding, the PO is partial
+      if (order) {
+        const orderedTotal = order.lines.reduce((s, l) => s + l.qty, 0);
+        const alreadyShipped = Object.values(shippedMap).reduce((a, b) => a + b, 0);
+        const nowShipping = lines.reduce((s, r) => s + Number(r.qty), 0);
+        if (alreadyShipped + nowShipping < orderedTotal) {
+          await supabase.from('inv_orders').update({ status: 'partial' }).eq('id', order.id);
+        }
+      }
       onSaved();
     } catch (e) { alert(e.message); }
     setSaving(false);
@@ -279,7 +313,7 @@ function ShipmentModal({ order, suppliers, products, warehouses, onClose, onSave
                 : <select className={input} value={r.product_id} onChange={e => pick(i, e.target.value)}>
                   <option value="">Select…</option>{products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>}</div>
-            <div><label className={label}>Qty</label><input type="number" min="1" className={input} value={r.qty} onChange={e => set(i, 'qty', e.target.value)} /></div>
+            <div><label className={label}>Qty{order && r.max != null ? ` (max ${r.max})` : ''}</label><input type="number" min="1" max={order ? r.max : undefined} className={input} value={r.qty} onChange={e => set(i, 'qty', e.target.value)} /></div>
             <div><label className={label}>Unit £</label><input className={input} value={r.unit_cost} onChange={e => set(i, 'unit_cost', e.target.value)} /></div>
             {!order && <button onClick={() => setRows(p => p.filter((_, x) => x !== i))} className="text-dim hover:text-red-600 pb-2"><Trash2 size={15} /></button>}
           </div>

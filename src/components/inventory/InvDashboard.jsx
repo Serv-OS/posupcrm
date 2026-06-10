@@ -40,6 +40,23 @@ export default function InvDashboard({ profile, onNavigate }) {
       .filter(v => v.n <= v.threshold).sort((a, b) => a.n - b.n);
   }, [serials, thresholds, products]);
 
+  const byProductRows = useMemo(() => {
+    const map = {};
+    serials.forEach(r => {
+      if (!map[r.product_name]) map[r.product_name] = { product: r.product_name, in_stock: 0, in_transit: 0, deployed: 0, costSum: 0, costN: 0, value: 0 };
+      const m = map[r.product_name];
+      if (r.status === 'in_stock' || r.status === 'staged') { m.in_stock++; m.value += Number(r.cost) || 0; }
+      else if (r.status === 'in_transit') m.in_transit++;
+      else if (r.status === 'deployed') m.deployed++;
+      if (r.cost != null) { m.costSum += Number(r.cost); m.costN++; }
+    });
+    const prodMap = new Map(products.map(pp => [pp.name, pp]));
+    return Object.values(map).map(m => {
+      const t = thresholdFor(thresholds, products, m.product, null) ?? prodMap.get(m.product)?.default_threshold ?? 3;
+      return { ...m, avgCost: m.costN ? m.costSum / m.costN : null, low: m.in_stock <= t };
+    }).sort((a, b) => a.product.localeCompare(b.product));
+  }, [serials, thresholds, products]);
+
   const byWarehouse = useMemo(() => {
     const map = {};
     inStock.forEach(r => { const k = r.warehouse?.name || '—'; map[k] = (map[k] || 0) + 1; });
@@ -99,6 +116,36 @@ export default function InvDashboard({ profile, onNavigate }) {
                 ))}
                 {byWarehouse.length === 0 && <div className="px-5 py-6 text-center text-dim text-sm italic">No stock yet.</div>}
               </div>
+            </div>
+          </div>
+
+          {/* Stock by product (in stock + transit + avg/landed value) */}
+          <div className="glass-card rounded-2xl overflow-hidden">
+            <div className="px-5 py-3 border-b border-bdr"><h3 className="text-[13px] font-bold text-paper">Stock by product</h3></div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
+                <thead><tr className="text-[10px] font-mono font-bold uppercase tracking-[0.12em] text-dim border-b border-bdr">
+                  <th className="text-left px-5 py-2 font-bold">Product</th>
+                  <th className="text-right px-3 py-2 font-bold">In stock</th>
+                  <th className="text-right px-3 py-2 font-bold">In transit</th>
+                  <th className="text-right px-3 py-2 font-bold">Deployed</th>
+                  <th className="text-right px-3 py-2 font-bold">Avg cost</th>
+                  <th className="text-right px-5 py-2 font-bold">Stock value</th>
+                </tr></thead>
+                <tbody>
+                  {byProductRows.map(r => (
+                    <tr key={r.product} className={`border-b border-bdr/50 ${r.low ? 'bg-red-500/5' : ''}`}>
+                      <td className="px-5 py-2 text-paper">{r.product}{r.low && <span className="ml-1.5 text-[8px] font-bold uppercase px-1 py-0.5 rounded bg-red-100 text-red-700">low</span>}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums font-semibold ${r.low ? 'text-red-600' : 'text-paper'}`}>{r.in_stock}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted">{r.in_transit || '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted">{r.deployed || '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted">{r.avgCost != null ? fmtGBP(r.avgCost) : '—'}</td>
+                      <td className="px-5 py-2 text-right tabular-nums text-paper">{fmtGBP(r.value)}</td>
+                    </tr>
+                  ))}
+                  {byProductRows.length === 0 && <tr><td colSpan={6} className="px-5 py-6 text-center text-dim italic text-sm">No stock yet.</td></tr>}
+                </tbody>
+              </table>
             </div>
           </div>
 

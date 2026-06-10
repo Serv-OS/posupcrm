@@ -214,3 +214,39 @@ export const csvExport = (rows, filename) => {
   a.download = filename;
   a.click();
 };
+
+// ── Serial admin (ports setProductCost / renameSerial / deleteSerial) ────────
+// Set cost on EVERY serial of a product (in stock and deployed), like the old app
+export async function setProductCost(productName, cost) {
+  await supabase.from('inv_serials').update({ cost }).eq('product_name', productName);
+}
+
+export async function renameSerial(oldSerial, newSerial) {
+  const o = norm(oldSerial), n = norm(newSerial);
+  if (!n) throw new Error('New serial required.');
+  await assertSerialsNew([n]);
+  const { error } = await supabase.from('inv_serials').update({ serial: n }).eq('serial', o);
+  if (error) throw error;
+  // keep the ledger consistent so lookup by the new serial shows full history
+  const { data: mvs } = await supabase.from('inv_movements').select('id, serials').contains('serials', [o]);
+  for (const m of (mvs || [])) {
+    await supabase.from('inv_movements').update({ serials: m.serials.map(s => s === o ? n : s) }).eq('id', m.id);
+  }
+}
+
+export async function deleteSerial(serial) {
+  const s = norm(serial);
+  const { error } = await supabase.from('inv_serials').delete().eq('serial', s);
+  if (error) throw error;
+  // ledger rows are kept for audit
+}
+
+// Shipped quantity per product for an order (any shipment status) — drives
+// remaining/split logic on POs
+export function shippedByProduct(order, shipments) {
+  const map = {};
+  shipments.filter(sh => sh.order_id === order.id && sh.status !== 'cancelled').forEach(sh => {
+    (sh.lines || []).forEach(l => { map[l.product_name] = (map[l.product_name] || 0) + l.qty; });
+  });
+  return map;
+}

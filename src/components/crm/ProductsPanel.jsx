@@ -19,6 +19,7 @@ export default function ProductsPanel({ profile }) {
   const [editing, setEditing] = useState(null);
   const [draft, setDraft] = useState(blank);
   const [suppliers, setSuppliers] = useState([]);
+  const [stockCounts, setStockCounts] = useState({});
 
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
@@ -28,6 +29,15 @@ export default function ProductsPanel({ profile }) {
     const { data } = await supabase.from('products').select('*').order('category').order('name');
     const { data: sup } = await supabase.from('inv_suppliers').select('id, name').order('name');
     setSuppliers(sup || []);
+    const { data: ser } = await supabase.from('inv_serials').select('product_name, status');
+    const counts = {};
+    (ser || []).forEach(r => {
+      if (!counts[r.product_name]) counts[r.product_name] = { in_stock: 0, in_transit: 0, deployed: 0 };
+      if (r.status === 'in_stock' || r.status === 'staged') counts[r.product_name].in_stock++;
+      else if (r.status === 'in_transit') counts[r.product_name].in_transit++;
+      else if (r.status === 'deployed') counts[r.product_name].deployed++;
+    });
+    setStockCounts(counts);
     setProducts(data || []);
     setLoading(false);
   };
@@ -135,7 +145,18 @@ export default function ProductsPanel({ profile }) {
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-sm font-mono text-paper">{money(p.default_price)}</div>
-                        <div className="text-[10px] text-dim">{BILLING[p.billing_type]}{p.unit ? ` · ${p.unit}` : ''}{p.track_inventory ? ' · 📦 inventory' : ''}</div>
+                        <div className="text-[10px] text-dim">{BILLING[p.billing_type]}{p.unit ? ` · ${p.unit}` : ''}</div>
+                        {p.track_inventory && (() => {
+                          const c = stockCounts[p.name] || { in_stock: 0, in_transit: 0, deployed: 0 };
+                          const low = p.default_threshold != null && c.in_stock <= p.default_threshold;
+                          return (
+                            <div className="flex items-center gap-1.5 justify-end mt-1">
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${low ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>{c.in_stock} in stock{low ? ' · LOW' : ''}</span>
+                              {c.in_transit > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">{c.in_transit} transit</span>}
+                              {c.deployed > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">{c.deployed} deployed</span>}
+                            </div>
+                          );
+                        })()}
                       </div>
                       {canWrite && (
                         <div className="flex gap-2 shrink-0">
