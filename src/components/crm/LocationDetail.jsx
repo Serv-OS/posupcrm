@@ -222,7 +222,7 @@ export default function LocationDetail({ locationId, profile, onClose, onNavigat
 
               <ProcessingRatesCard locationId={locationId} companyId={location.company_id} onNavigate={onNavigate} />
 
-              <HardwareCard locationId={locationId} />
+              <HardwareCard locationId={locationId} profile={profile} />
 
               <InvoicesCard locationId={locationId} profile={profile} onNavigate={onNavigate} />
             </div>

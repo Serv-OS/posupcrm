@@ -213,7 +213,7 @@ export default function CompanyDetail({ companyId, profile, onClose, onNavigate,
 
               <ProcessingRatesCard companyId={companyId} onNavigate={onNavigate} />
 
-              <HardwareCard companyId={companyId} />
+              <HardwareCard companyId={companyId} profile={profile} />
 
               <InvoicesCard companyId={companyId} profile={profile} onNavigate={onNavigate} />
 
