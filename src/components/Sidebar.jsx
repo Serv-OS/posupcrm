@@ -13,11 +13,11 @@ import {
 const COLLAPSIBLE = [
   { id: 'sales', label: 'Sales', items: [
     ['companies', 'Companies', Building2], ['locations', 'Locations', MapPin], ['contacts', 'Contacts', User],
-    ['leads', 'Leads', Target], ['deals', 'Deals', Banknote], ['products', 'Products', Box],
+    ['leads', 'Leads', Target], ['deals', 'Deals', Banknote],
     ['processing', 'Card Processing', CreditCard], ['invoices', 'Invoices', Receipt],
   ] },
   { id: 'inventory', label: 'Inventory', items: [
-    ['inv_dashboard', 'Dashboard', Warehouse], ['inv_stock', 'Stock', Boxes],
+    ['inv_dashboard', 'Dashboard', Warehouse], ['products', 'Products', Box], ['inv_stock', 'Stock', Boxes],
     ['inv_in', 'Stock In', PackagePlus], ['inv_out', 'Stock Out', PackageMinus],
     ['inv_purchasing', 'Purchasing', ShoppingCart], ['inv_stocktake', 'Stocktake', ClipboardCheck],
     ['inv_reports', 'Reports', BarChart3],
