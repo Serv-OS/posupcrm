@@ -26,7 +26,7 @@ export default function PurchasingView({ profile, initialTab = 'orders' }) {
       supabase.from('inv_orders').select('*, lines:inv_order_lines(*)').order('created_at', { ascending: false }),
       supabase.from('inv_shipments').select('*, lines:inv_shipment_lines(*), warehouse:inv_warehouses(name)').order('created_at', { ascending: false }),
       supabase.from('inv_suppliers').select('*').order('name'),
-      supabase.from('products').select('id, name, inv_category, default_price').eq('active', true).order('name'),
+      supabase.from('products').select('id, name, inv_category, default_price, cost_price').eq('active', true).order('name'),
       supabase.from('inv_warehouses').select('*'),
     ]);
     setOrders(o.data || []); setShipments(sh.data || []); setSuppliers(su.data || []);
@@ -172,7 +172,7 @@ function POModal({ products, suppliers, profile, onClose, onSaved }) {
   const [rows, setRows] = useState([{ product_id: '', product_name: '', category: '', qty: 1, unit_cost: '' }]);
   const [saving, setSaving] = useState(false);
   const set = (i, k, v) => setRows(p => p.map((r, x) => x === i ? { ...r, [k]: v } : r));
-  const pick = (i, id) => { const p = products.find(x => x.id === id); setRows(prev => prev.map((r, x) => x === i ? { ...r, product_id: id, product_name: p?.name || '', category: p?.inv_category || '', unit_cost: r.unit_cost || p?.default_price || '' } : r)); };
+  const pick = (i, id) => { const p = products.find(x => x.id === id); setRows(prev => prev.map((r, x) => x === i ? { ...r, product_id: id, product_name: p?.name || '', category: p?.inv_category || '', unit_cost: r.unit_cost || p?.cost_price || '' } : r)); };
 
   const subtotal = rows.reduce((s, r) => s + (Number(r.unit_cost) || 0) * (Number(r.qty) || 0), 0);
   const resolvedTax = taxAmount !== '' ? Number(taxAmount) : (taxRate !== '' ? subtotal * Number(taxRate) / 100 : 0);

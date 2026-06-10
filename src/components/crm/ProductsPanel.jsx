@@ -11,7 +11,7 @@ const CATEGORIES = [
 const CAT_LABEL = Object.fromEntries(CATEGORIES.map(c => [c.key, c.label]));
 const BILLING = { one_off: 'One-off', monthly: 'Monthly', annual: 'Annual', usage: 'Usage' };
 
-const blank = { name: '', description: '', sku: '', category: 'hardware', billing_type: 'one_off', default_price: '', unit: '', active: true, track_inventory: false, inv_category: '', default_threshold: '', supplier_id: '' };
+const blank = { name: '', description: '', sku: '', category: 'hardware', billing_type: 'one_off', default_price: '', cost_price: '', unit: '', active: true, track_inventory: false, inv_category: '', default_threshold: '', supplier_id: '' };
 
 export default function ProductsPanel({ profile }) {
   const [products, setProducts] = useState([]);
@@ -43,14 +43,14 @@ export default function ProductsPanel({ profile }) {
   };
 
   const startNew = () => { setDraft(blank); setEditing('new'); };
-  const startEdit = (p) => { setDraft({ ...p, default_price: p.default_price ?? '' }); setEditing(p.id); };
+  const startEdit = (p) => { setDraft({ ...p, default_price: p.default_price ?? '', cost_price: p.cost_price ?? '' }); setEditing(p.id); };
 
   const save = async () => {
     if (!draft.name.trim()) { alert('Name is required.'); return; }
     const payload = {
       name: draft.name.trim(), description: draft.description?.trim() || null, sku: draft.sku?.trim() || null,
       category: draft.category, billing_type: draft.billing_type,
-      default_price: parseFloat(draft.default_price) || 0, unit: draft.unit?.trim() || null, active: draft.active,
+      default_price: parseFloat(draft.default_price) || 0, cost_price: draft.cost_price === '' ? null : parseFloat(draft.cost_price), unit: draft.unit?.trim() || null, active: draft.active,
       track_inventory: !!draft.track_inventory, inv_category: draft.inv_category || null,
       default_threshold: draft.default_threshold === '' || draft.default_threshold == null ? null : parseInt(draft.default_threshold),
       supplier_id: draft.supplier_id || null,
@@ -88,7 +88,13 @@ export default function ProductsPanel({ profile }) {
                   {CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</select></div>
                 <div><label className={label}>Billing</label><select className={input} value={draft.billing_type} onChange={e => setDraft({ ...draft, billing_type: e.target.value })}>
                   {Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
-                <div><label className={label}>Default price (£)</label><input type="number" className={input} value={draft.default_price} onChange={e => setDraft({ ...draft, default_price: e.target.value })} /></div>
+                <div><label className={label}>Selling price (£)</label><input type="number" className={input} value={draft.default_price} onChange={e => setDraft({ ...draft, default_price: e.target.value })} /></div>
+                <div><label className={label}>Cost price (£)</label><input type="number" className={input} value={draft.cost_price} onChange={e => setDraft({ ...draft, cost_price: e.target.value })} />
+                  {draft.default_price !== '' && draft.cost_price !== '' && Number(draft.default_price) > 0 && (
+                    <div className="text-[11px] text-emerald-600 font-semibold mt-1">
+                      Margin: £{(Number(draft.default_price) - Number(draft.cost_price)).toFixed(2)} ({Math.round(((Number(draft.default_price) - Number(draft.cost_price)) / Number(draft.default_price)) * 100)}%)
+                    </div>
+                  )}</div>
                 <div><label className={label}>Unit (optional)</label><input className={input} value={draft.unit || ''} onChange={e => setDraft({ ...draft, unit: e.target.value })} placeholder="per till, per location…" /></div>
                 <div><label className={label}>SKU (optional)</label><input className={input} value={draft.sku || ''} onChange={e => setDraft({ ...draft, sku: e.target.value })} /></div>
               </div>
@@ -145,6 +151,9 @@ export default function ProductsPanel({ profile }) {
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-sm font-mono text-paper">{money(p.default_price)}</div>
+                        {p.cost_price != null && (
+                          <div className="text-[10px] text-dim">cost {money(p.cost_price)}{p.default_price > 0 ? ` · ${Math.round(((p.default_price - p.cost_price) / p.default_price) * 100)}% margin` : ''}</div>
+                        )}
                         <div className="text-[10px] text-dim">{BILLING[p.billing_type]}{p.unit ? ` · ${p.unit}` : ''}</div>
                         {p.track_inventory && (() => {
                           const c = stockCounts[p.name] || { in_stock: 0, in_transit: 0, deployed: 0 };

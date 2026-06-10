@@ -24,7 +24,7 @@ export default function StockInView({ profile }) {
   useEffect(() => { load(); }, []);
   const load = async () => {
     const [p, w, s, o] = await Promise.all([
-      supabase.from('products').select('id, name, inv_category, default_price').eq('active', true).order('name'),
+      supabase.from('products').select('id, name, inv_category, default_price, cost_price').eq('active', true).order('name'),
       supabase.from('inv_warehouses').select('*').order('created_at'),
       supabase.from('inv_suppliers').select('id, name').order('name'),
       supabase.from('inv_orders').select('id, po_number, supplier_name, lines:inv_order_lines(*)').neq('status', 'cancelled').order('created_at', { ascending: false }),
@@ -36,7 +36,7 @@ export default function StockInView({ profile }) {
   const set = (i, k, v) => setLines(prev => prev.map((l, idx) => idx === i ? { ...l, [k]: v } : l));
   const pickProduct = (i, id) => {
     const p = products.find(x => x.id === id);
-    setLines(prev => prev.map((l, idx) => idx === i ? { ...l, product_id: id, product_name: p?.name || '', category: p?.inv_category || l.category } : l));
+    setLines(prev => prev.map((l, idx) => idx === i ? { ...l, product_id: id, product_name: p?.name || '', category: p?.inv_category || l.category, unit_cost: l.unit_cost === '' && p?.cost_price != null ? p.cost_price : l.unit_cost } : l));
   };
 
   // PO link: locked landed costs flow onto lines
