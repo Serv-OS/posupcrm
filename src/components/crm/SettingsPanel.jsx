@@ -4,7 +4,7 @@ import { TEAM_OPTIONS, TEAM_LABELS } from '../UsersPanel.jsx';
 import AiSettingsCard from './AiSettingsCard.jsx';
 import BrandingCard from './BrandingCard.jsx';
 
-const GMAIL_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '836252293153-ekl6o41r2kra549aqnjr9bvpiq2t4nfg.apps.googleusercontent.com';
+import { getGoogleClientId } from '../../lib/googleClientId';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const REDIRECT_URI = `${SUPABASE_URL}/functions/v1/gmail-oauth-callback`;
 const SCOPES = 'https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send';
@@ -141,8 +141,9 @@ export default function SettingsPanel({ profile }) {
     const { data: { session } } = await supabase.auth.getSession();
     const state = session?.access_token || '';
 
+    const clientId = await getGoogleClientId();
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-      `client_id=${encodeURIComponent(GMAIL_CLIENT_ID)}` +
+      `client_id=${encodeURIComponent(clientId)}` +
       `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
       `&response_type=code` +
       `&scope=${encodeURIComponent(SCOPES)}` +

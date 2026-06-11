@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { TEAM_LABELS } from './UsersPanel.jsx';
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '836252293153-ekl6o41r2kra549aqnjr9bvpiq2t4nfg.apps.googleusercontent.com';
+import { getGoogleClientId } from '../lib/googleClientId';
 const REDIRECT_URI = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gmail-oauth-callback`;
 const PERSONAL_SCOPES = 'openid email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.messages https://www.googleapis.com/auth/chat.memberships.readonly https://www.googleapis.com/auth/directory.readonly';
 
@@ -42,8 +42,9 @@ export default function AccountPanel({ profile, onSaved }) {
 
   const connectGoogle = async () => {
     const { data: { session } } = await supabase.auth.getSession();
+    const clientId = await getGoogleClientId();
     const url = 'https://accounts.google.com/o/oauth2/v2/auth?' +
-      `client_id=${encodeURIComponent(GOOGLE_CLIENT_ID)}` +
+      `client_id=${encodeURIComponent(clientId)}` +
       `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
       `&response_type=code&access_type=offline&prompt=consent` +
       `&scope=${encodeURIComponent(PERSONAL_SCOPES)}` +
