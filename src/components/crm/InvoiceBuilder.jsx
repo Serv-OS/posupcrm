@@ -31,7 +31,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
       supabase.from('inv_serials').select('product_id').eq('status', 'in_stock'),
     ]);
     setInv(i.data);
-    setLines((li.data || []).length ? li.data : [{ _new: true, name: '', description: '', qty: 1, unit_price: 0 }]);
+    setLines((li.data || []).length ? li.data : [{ _new: true, name: '', description: '', qty: 1, unit_price: 0, tax_rate: 20 }]);
     setCompanies(c.data || []); setLocations(l.data || []); setContacts(ct.data || []);
     setProducts(pr.data || []);
     const counts = {};
@@ -50,7 +50,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
   const locs = locations.filter(l => !inv.company_id || l.company_id === inv.company_id);
 
   const subtotal = lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_price) || 0), 0);
-  const taxAmount = subtotal * Number(inv.tax_rate || 0) / 100;
+  const taxAmount = lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_price) || 0) * (Number(l.tax_rate) || 0) / 100, 0);
   const total = subtotal + taxAmount;
 
   const notify = (msg) => { setFlash(msg); setTimeout(() => setFlash(''), 2500); };
@@ -60,7 +60,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
     const patch = {
       company_id: inv.company_id || null, location_id: inv.location_id || null, contact_id: inv.contact_id || null,
       email_to: (inv.email_to || '').trim() || null, issue_date: inv.issue_date, due_date: inv.due_date || null,
-      tax_rate: Number(inv.tax_rate) || 0, subtotal, tax_amount: taxAmount, total,
+      subtotal, tax_amount: taxAmount, total,
       terms: (inv.terms || '').trim() || null, notes: (inv.notes || '').trim() || null,
       po_number: (inv.po_number || '').trim() || null, ...extra,
     };
@@ -71,7 +71,8 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
       if (clean.length) {
         await supabase.from('invoice_line_items').insert(clean.map((l, i) => ({
           invoice_id: invoiceId, name: l.name.trim(), description: (l.description || '').trim() || null,
-          qty: Number(l.qty) || 1, unit_price: Number(l.unit_price) || 0, sort: i,
+          qty: Number(l.qty) || 1, unit_price: Number(l.unit_price) || 0,
+          tax_rate: Number(l.tax_rate) || 0, sort: i,
         })));
       }
     }
@@ -179,7 +180,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                         const p = products.find(x => x.id === e.target.value);
                         if (p) setLines(prev => {
                           const blank = prev.length === 1 && !(prev[0].name || '').trim();
-                          const line = { _new: true, name: p.name, description: p.description || '', qty: 1, unit_price: Number(p.default_price) || 0 };
+                          const line = { _new: true, name: p.name, description: p.description || '', qty: 1, unit_price: Number(p.default_price) || 0, tax_rate: 20 };
                           return blank ? [line] : [...prev, line];
                         });
                       }}>
@@ -191,7 +192,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                   ) : (
                     <span className="text-[11px] text-dim italic">No products in the catalogue yet — add them under Inventory → Products</span>
                   )}
-                  <button onClick={() => setLines(p => [...p, { _new: true, name: '', description: '', qty: 1, unit_price: 0 }])}
+                  <button onClick={() => setLines(p => [...p, { _new: true, name: '', description: '', qty: 1, unit_price: 0, tax_rate: 20 }])}
                     className="text-xs text-ember hover:text-ember-deep font-medium flex items-center gap-1"><Plus size={13} /> Blank line</button>
                 </div>
               )}
@@ -202,8 +203,12 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                   <input className={input} disabled={locked} value={l.name} onChange={e => setLine(i, 'name', e.target.value)} placeholder="Item name" />
                   <input className={input + ' text-xs'} disabled={locked} value={l.description || ''} onChange={e => setLine(i, 'description', e.target.value)} placeholder="Description (optional)" />
                 </div>
-                <input className={input + ' w-16 text-right'} disabled={locked} value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} />
-                <input className={input + ' w-28 text-right'} disabled={locked} value={l.unit_price} onChange={e => setLine(i, 'unit_price', e.target.value)} />
+                <input className={input + ' w-16 text-right'} disabled={locked} value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} title="Qty" />
+                <input className={input + ' w-28 text-right'} disabled={locked} value={l.unit_price} onChange={e => setLine(i, 'unit_price', e.target.value)} title="Unit price" />
+                <div className="w-16 relative">
+                  <input className={input + ' text-right !pr-5'} disabled={locked} value={l.tax_rate ?? 20} onChange={e => setLine(i, 'tax_rate', e.target.value)} title="VAT %" />
+                  <span className="absolute right-2 top-2.5 text-xs text-dim pointer-events-none">%</span>
+                </div>
                 <div className="w-24 text-right text-sm text-paper tabular-nums pt-2.5">{money((Number(l.qty) || 0) * (Number(l.unit_price) || 0))}</div>
                 {!locked && <button onClick={() => setLines(p => p.filter((_, j) => j !== i))} className="text-dim hover:text-red-600 p-2"><Trash2 size={14} /></button>}
               </div>
@@ -211,12 +216,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
             <div className="flex justify-end pt-2 border-t border-bdr">
               <div className="w-64 space-y-1.5 text-sm">
                 <div className="flex justify-between text-muted"><span>Subtotal</span><span className="tabular-nums">{money(subtotal)}</span></div>
-                <div className="flex justify-between items-center text-muted">
-                  <span>VAT
-                    <input className={input + ' !w-14 !py-0.5 inline-block text-right mx-1'} disabled={locked} value={inv.tax_rate} onChange={e => set('tax_rate', e.target.value)} />%
-                  </span>
-                  <span className="tabular-nums">{money(taxAmount)}</span>
-                </div>
+                <div className="flex justify-between text-muted"><span>VAT (per line)</span><span className="tabular-nums">{money(taxAmount)}</span></div>
                 <div className="flex justify-between text-base font-bold text-paper pt-1.5 border-t border-bdr"><span>Total</span><span className="tabular-nums">{money(total)}</span></div>
                 {inv.status === 'paid' && <div className="flex justify-between text-emerald-600 font-semibold"><span>Paid</span><span className="tabular-nums">{money(inv.amount_paid ?? total)}</span></div>}
               </div>

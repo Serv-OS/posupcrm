@@ -43,14 +43,14 @@ async function createPaidInvoiceForQuote(supabase: any, quoteId: string, paidAmo
         invoice_id: inv.id, name: l.name, description: l.description,
         qty: Number(l.qty) || 1,
         unit_price: (Number(l.unit_price) || 0) * (1 - (Number(l.discount) || 0) / 100),
-        sort: i,
+        tax_rate: Number(l.tax_rate) || 0, sort: i,
       })));
     }
   } else {
     await supabase.from("invoice_line_items").insert({
       invoice_id: inv.id, name: `Deposit on quote Q-${q.quote_number}`,
       description: q.deposit_percent ? `${q.deposit_percent}% deposit` : null,
-      qty: 1, unit_price: paidAmount, sort: 0,
+      qty: 1, unit_price: paidAmount, tax_rate: 0, sort: 0,
     });
   }
 

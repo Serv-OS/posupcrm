@@ -32,7 +32,8 @@ serve(async (req) => {
       try {
         const lines = Array.isArray(sched.lines) ? sched.lines : [];
         const subtotal = lines.reduce((s: number, l: any) => s + (Number(l.qty) || 1) * (Number(l.unit_price) || 0), 0);
-        const taxAmount = subtotal * Number(sched.tax_rate || 0) / 100;
+        const taxAmount = lines.reduce((s: number, l: any) =>
+          s + (Number(l.qty) || 1) * (Number(l.unit_price) || 0) * (Number(l.tax_rate ?? sched.tax_rate) || 0) / 100, 0);
         const total = subtotal + taxAmount;
 
         const dueDate = new Date(Date.now() + (Number(sched.due_days) || 14) * 86400000).toISOString().slice(0, 10);
@@ -49,7 +50,8 @@ serve(async (req) => {
         if (lines.length) {
           await supabase.from("invoice_line_items").insert(lines.map((l: any, i: number) => ({
             invoice_id: inv.id, name: l.name || "Item", description: l.description || null,
-            qty: Number(l.qty) || 1, unit_price: Number(l.unit_price) || 0, sort: i,
+            qty: Number(l.qty) || 1, unit_price: Number(l.unit_price) || 0,
+            tax_rate: Number(l.tax_rate ?? sched.tax_rate) || 0, sort: i,
           })));
         }
 

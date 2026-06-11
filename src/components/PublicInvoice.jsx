@@ -92,6 +92,7 @@ export default function PublicInvoice({ token }) {
                 <th className="text-left py-2 font-bold">Item</th>
                 <th className="text-right py-2 font-bold w-14">Qty</th>
                 <th className="text-right py-2 font-bold w-24">Price</th>
+                <th className="text-right py-2 font-bold w-14">VAT</th>
                 <th className="text-right py-2 font-bold w-24">Amount</th>
               </tr>
             </thead>
@@ -104,6 +105,7 @@ export default function PublicInvoice({ token }) {
                   </td>
                   <td className="py-2.5 text-right text-slate-600 tabular-nums">{Number(it.qty)}</td>
                   <td className="py-2.5 text-right text-slate-600 tabular-nums">{money(it.unit_price)}</td>
+                  <td className="py-2.5 text-right text-slate-600 tabular-nums">{Number(it.tax_rate ?? 0)}%</td>
                   <td className="py-2.5 text-right text-slate-800 font-medium tabular-nums">{money(Number(it.qty) * Number(it.unit_price))}</td>
                 </tr>
               ))}
@@ -114,7 +116,7 @@ export default function PublicInvoice({ token }) {
           <div className="flex justify-end mt-4">
             <div className="w-60 space-y-1.5 text-sm">
               <div className="flex justify-between text-slate-500"><span>Subtotal</span><span className="tabular-nums">{money(inv.subtotal)}</span></div>
-              <div className="flex justify-between text-slate-500"><span>VAT ({Number(inv.tax_rate)}%)</span><span className="tabular-nums">{money(inv.tax_amount)}</span></div>
+              <div className="flex justify-between text-slate-500"><span>VAT</span><span className="tabular-nums">{money(inv.tax_amount)}</span></div>
               <div className="flex justify-between text-base font-bold text-slate-900 pt-1.5 border-t border-slate-200"><span>Total due</span><span className="tabular-nums">{money(inv.total)}</span></div>
             </div>
           </div>
