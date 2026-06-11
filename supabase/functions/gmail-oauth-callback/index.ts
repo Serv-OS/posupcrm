@@ -80,7 +80,7 @@ serve(async (req) => {
       if (!connectedBy) {
         return new Response(redirectHtml(appUrl, false, "Not signed in", "google-oauth-result"), { headers: { "Content-Type": "text/html" } });
       }
-      await supabase.from("user_integrations").upsert({
+      const { error: uiError } = await supabase.from("user_integrations").upsert({
         profile_id: connectedBy,
         provider: "google",
         email,
@@ -90,11 +90,14 @@ serve(async (req) => {
         scope: tokens.scope || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: "profile_id" });
+      if (uiError) {
+        return new Response(redirectHtml(appUrl, false, `Could not save connection: ${uiError.message}`, "google-oauth-result"), { headers: { "Content-Type": "text/html" } });
+      }
       return new Response(redirectHtml(appUrl, true, email, "google-oauth-result"), { headers: { "Content-Type": "text/html" } });
     }
 
     // Shared support inbox (unchanged)
-    await supabase.from("gmail_connections").upsert({
+    const { error: gcError } = await supabase.from("gmail_connections").upsert({
       email,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
@@ -103,6 +106,9 @@ serve(async (req) => {
       is_active: true,
       updated_at: new Date().toISOString(),
     }, { onConflict: "email" });
+    if (gcError) {
+      return new Response(redirectHtml(appUrl, false, `Could not save connection: ${gcError.message}`), { headers: { "Content-Type": "text/html" } });
+    }
 
     return new Response(redirectHtml(appUrl, true, email), {
       headers: { "Content-Type": "text/html" },
