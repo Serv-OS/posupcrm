@@ -95,3 +95,14 @@ SELECT cron.schedule('invoice-recurring-daily', '0 6 * * *', $$
     headers := '{"Content-Type": "application/json"}'::jsonb,
     body := '{}'::jsonb, timeout_milliseconds := 55000);
 $$);
+
+-- Realtime: live updates for the bell, tickets, and CRM lists (the schema
+-- clone does NOT copy publication membership — without this nothing is live)
+ALTER PUBLICATION supabase_realtime ADD TABLE
+  public.buckets, public.backlog_items, public.comments, public.activity,
+  public.features, public.companies, public.locations, public.contacts,
+  public.deals, public.onboardings, public.tickets, public.tasks,
+  public.mentions, public.agent_status, public.leads, public.notifications;
+
+-- NOTE: migration 050's dispatch_notification() function embeds the project
+-- ref in its pg_net URL — re-run 050 with __PROJECT_REF__ swapped per instance.
