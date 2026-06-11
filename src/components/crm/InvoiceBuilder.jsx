@@ -125,6 +125,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
   };
 
   const input = "w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember disabled:opacity-60";
+  const cell = "px-2 py-1.5 bg-card border border-bdr rounded-lg text-sm text-paper placeholder-dim focus:outline-none focus:border-ember disabled:opacity-60";
   const label = "text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block";
 
   return (
@@ -197,29 +198,27 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                 </div>
               )}
             </div>
-            {/* Column headers */}
-            <div className="flex gap-2 items-center pt-1">
-              <div className="flex-1 text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">Item</div>
-              <div className="w-16 text-right text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">Qty</div>
-              <div className="w-28 text-right text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">Unit £</div>
-              <div className="w-16 text-right text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">VAT</div>
-              <div className="w-24 text-right text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim">Net</div>
-              {!locked && <div className="w-[30px]" />}
-            </div>
+            {lines.length === 0 && <div className="text-xs text-dim italic py-4 text-center">No line items yet. Add from products or start a blank line.</div>}
             {lines.map((l, i) => (
-              <div key={l.id || `n${i}`} className="flex gap-2 items-start bg-card/40 border border-bdr/60 rounded-xl p-2">
-                <div className="flex-1 space-y-1">
-                  <input className={input} disabled={locked} value={l.name} onChange={e => setLine(i, 'name', e.target.value)} placeholder="Item name — e.g. Card terminal" />
-                  <input className={input + ' text-xs'} disabled={locked} value={l.description || ''} onChange={e => setLine(i, 'description', e.target.value)} placeholder="Description shown under the item (optional)" />
+              <div key={l.id || `n${i}`} className="glass-inner rounded-xl p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input className={cell + ' flex-1'} disabled={locked} value={l.name} onChange={e => setLine(i, 'name', e.target.value)} placeholder="Item name — e.g. Card terminal" />
+                  {!locked && <button onClick={() => setLines(p => p.filter((_, j) => j !== i))} title="Remove line" className="text-red-500 hover:text-red-600 text-sm shrink-0">&times;</button>}
                 </div>
-                <input className={input + ' w-16 text-right'} disabled={locked} value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} placeholder="1" title="Quantity" />
-                <input className={input + ' w-28 text-right'} disabled={locked} value={l.unit_price} onChange={e => setLine(i, 'unit_price', e.target.value)} placeholder="0.00" title="Unit price (£, ex VAT)" />
-                <div className="w-16 relative">
-                  <input className={input + ' text-right !pr-5'} disabled={locked} value={l.tax_rate ?? 20} onChange={e => setLine(i, 'tax_rate', e.target.value)} placeholder="20" title="VAT %" />
-                  <span className="absolute right-2 top-2.5 text-xs text-dim pointer-events-none">%</span>
+                <input className={cell + ' w-full text-xs'} disabled={locked} value={l.description || ''} onChange={e => setLine(i, 'description', e.target.value)} placeholder="Description (shown on the invoice)" />
+                <div className="grid grid-cols-3 gap-2">
+                  <div><span className="text-[9px] text-dim block">Qty</span>
+                    <input type="number" className={cell + ' w-full'} disabled={locked} value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} placeholder="1" /></div>
+                  <div><span className="text-[9px] text-dim block">Unit £ (ex VAT)</span>
+                    <input type="number" className={cell + ' w-full'} disabled={locked} value={l.unit_price} onChange={e => setLine(i, 'unit_price', e.target.value)} placeholder="0.00" /></div>
+                  <div><span className="text-[9px] text-dim block">VAT %</span>
+                    <input type="number" className={cell + ' w-full'} disabled={locked} value={l.tax_rate ?? 20} onChange={e => setLine(i, 'tax_rate', e.target.value)} placeholder="20" /></div>
                 </div>
-                <div className="w-24 text-right text-sm text-paper tabular-nums pt-2.5" title="Line net (ex VAT)">{money((Number(l.qty) || 0) * (Number(l.unit_price) || 0))}</div>
-                {!locked && <button onClick={() => setLines(p => p.filter((_, j) => j !== i))} title="Remove line" className="text-dim hover:text-red-600 p-2"><Trash2 size={14} /></button>}
+                <div className="text-right text-xs text-muted">
+                  Net: <span className="text-paper font-mono font-semibold">{money((Number(l.qty) || 0) * (Number(l.unit_price) || 0))}</span>
+                  <span className="mx-1.5 text-dim">·</span>
+                  VAT: <span className="text-paper font-mono font-semibold">{money((Number(l.qty) || 0) * (Number(l.unit_price) || 0) * (Number(l.tax_rate) || 0) / 100)}</span>
+                </div>
               </div>
             ))}
             <div className="flex justify-end pt-2 border-t border-bdr">
