@@ -36,14 +36,48 @@ function inQuietHours(start: string | null, end: string | null): boolean {
 }
 
 // Post a notification to a Google Chat space via its incoming webhook.
-async function postToChat(webhookUrl: string, title: string, body: string, appUrl: string): Promise<void> {
-  const text = `*${title || "CRM notification"}*${body ? `\n${body}` : ""}\n<${appUrl}|Open CRM>`;
+// `mentionIds` are Google numeric user IDs to @mention (gives them a personal ping).
+async function postToChat(webhookUrl: string, title: string, body: string, appUrl: string, mentionIds: string[] = []): Promise<void> {
+  const mentions = mentionIds.filter(Boolean).map((id) => `<users/${id}>`).join(" ");
+  const text = `${mentions ? mentions + "\n" : ""}*${title || "CRM notification"}*${body ? `\n${body}` : ""}\n<${appUrl}|Open CRM>`;
   const res = await fetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json; charset=UTF-8" },
     body: JSON.stringify({ text }),
   });
   if (!res.ok) throw new Error(`Chat webhook HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+}
+
+// Resolve (and cache) a user's Google numeric ID from their connected Google
+// account, so we can @mention them in Chat. Returns null if not resolvable.
+async function resolveGoogleId(supabase: any, profileId: string): Promise<string | null> {
+  const { data: prof } = await supabase.from("profiles").select("google_chat_id").eq("id", profileId).maybeSingle();
+  if (prof?.google_chat_id) return prof.google_chat_id;
+  const { data: integ } = await supabase.from("user_integrations")
+    .select("id, access_token, refresh_token, token_expires_at").eq("profile_id", profileId).eq("provider", "google").maybeSingle();
+  if (!integ?.refresh_token) return null;
+
+  let token = integ.access_token;
+  const expired = !integ.token_expires_at || new Date(integ.token_expires_at).getTime() - Date.now() < 60000;
+  if (expired) {
+    const r = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: Deno.env.get("GMAIL_CLIENT_ID")!, client_secret: Deno.env.get("GMAIL_CLIENT_SECRET")!,
+        refresh_token: integ.refresh_token, grant_type: "refresh_token",
+      }),
+    });
+    const t = await r.json();
+    if (!t.access_token) return null;
+    token = t.access_token;
+    await supabase.from("user_integrations").update({
+      access_token: t.access_token, token_expires_at: new Date(Date.now() + t.expires_in * 1000).toISOString(),
+    }).eq("id", integ.id);
+  }
+  const ui = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: `Bearer ${token}` } });
+  const sub = (await ui.json())?.sub;
+  if (sub) await supabase.from("profiles").update({ google_chat_id: sub }).eq("id", profileId);
+  return sub || null;
 }
 
 // ---- Google Chat app (service account) for private 1:1 DMs ------------------
@@ -233,7 +267,15 @@ serve(async (req) => {
         results.chat = "skipped: already posted for this event";
       } else {
         try {
-          await postToChat(cfg.chat_webhook_url, n.title, n.body, appUrl);
+          // Gather everyone this event notified, so each is @mentioned (and
+          // personally pinged) in the single space post.
+          let rq = supabase.from("notifications").select("recipient_id")
+            .eq("title", n.title).gte("created_at", since);
+          rq = n.link_id ? rq.eq("link_id", n.link_id) : rq.is("link_id", null);
+          const { data: rows } = await rq;
+          const recipientIds = [...new Set([n.recipient_id, ...((rows || []).map((r: any) => r.recipient_id))])].filter(Boolean);
+          const mentionIds = (await Promise.all(recipientIds.map((id) => resolveGoogleId(supabase, id)))).filter(Boolean) as string[];
+          await postToChat(cfg.chat_webhook_url, n.title, n.body, appUrl, mentionIds);
           updates.chatted_at = new Date().toISOString();
           results.chat = "sent";
         } catch (e) { results.chat = "failed: " + (e as Error).message; }

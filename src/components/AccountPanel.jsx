@@ -302,18 +302,9 @@ export default function AccountPanel({ profile, onSaved }) {
                     checked={prefs.email_enabled} onChange={v => setPrefs({ ...prefs, email_enabled: v })} />
                   <Toggle label="SMS notifications" sub={form.mobile || 'No mobile number set'}
                     checked={prefs.sms_enabled} onChange={v => setPrefs({ ...prefs, sms_enabled: v })} />
-                  <Toggle label="Google Chat (private DM)" sub="A direct message from the CRM app, just to you"
-                    checked={prefs.chat_dm_enabled} onChange={v => setPrefs({ ...prefs, chat_dm_enabled: v })} />
-                  {prefs.chat_dm_enabled && (
-                    <div className="flex items-center gap-2 pl-1">
-                      <button type="button" onClick={sendDmTest} disabled={dmTest === 'sending'}
-                        className="text-xs text-ember hover:underline disabled:opacity-50">
-                        {dmTest === 'sending' ? 'Sending…' : 'Send test DM'}
-                      </button>
-                      {dmTest === 'sent' && <span className="text-xs text-emerald-600">Sent — check Google Chat ✓</span>}
-                      {typeof dmTest === 'string' && dmTest.startsWith('error') && <span className="text-xs text-red-600">{dmTest.replace('error: ', '')}</span>}
-                    </div>
-                  )}
+                  <div className="text-[11px] text-dim pl-1 pt-1">
+                    Google Chat: when you're @mentioned, you're tagged in the team's <span className="text-muted font-medium">CRM notifications</span> space, so Chat pings you personally.
+                  </div>
                 </div>
               </div>
 
