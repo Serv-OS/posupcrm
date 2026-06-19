@@ -3,7 +3,7 @@ import { LogoLockup } from './ServOSLogo.jsx';
 
 const FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 const money = (v) => `£${Number(v || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const CAT = { hardware: 'Hardware', services: 'Services', saas: 'SaaS plan', payments: 'Payments' };
+const CAT = { hardware: 'Hardware', services: 'Services', saas: 'SaaS plan', payments: 'Payments', resale_commissions: 'Resale commission' };
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
 
 export default function PublicQuote({ token }) {

@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { handleClosedWon } from '../../lib/dealHelpers';
 
-const CAT_LABEL = { hardware: 'Hardware', services: 'Services', saas: 'SaaS', payments: 'Payments' };
+const CAT_LABEL = { hardware: 'Hardware', services: 'Services', saas: 'SaaS', payments: 'Payments', resale_commissions: 'Resale commission' };
 const STATUS_STYLES = {
   draft: 'bg-slate-100 text-slate-600 border border-slate-200',
   sent: 'bg-blue-100 text-blue-700 border border-blue-200',

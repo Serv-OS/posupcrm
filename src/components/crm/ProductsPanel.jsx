@@ -7,6 +7,7 @@ const CATEGORIES = [
   { key: 'services', label: 'Services', icon: '\u{1F6E0}\u{FE0F}' },
   { key: 'saas', label: 'SaaS plan', icon: '\u{1F4E6}' },
   { key: 'payments', label: 'Payments', icon: '\u{1F4B3}' },
+  { key: 'resale_commissions', label: 'Resale commissions', icon: '\u{1F4B0}' },
 ];
 const CAT_LABEL = Object.fromEntries(CATEGORIES.map(c => [c.key, c.label]));
 const BILLING = { one_off: 'One-off', monthly: 'Monthly', annual: 'Annual', usage: 'Usage' };
