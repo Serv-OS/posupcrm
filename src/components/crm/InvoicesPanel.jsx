@@ -194,12 +194,14 @@ function ScheduleModal({ schedule, companies, locations, contacts, products = []
     tax_rate: s.tax_rate ?? 20, terms: s.terms || '', notes: s.notes || '',
     auto_send: s.auto_send ?? true, active: s.active ?? true,
   });
-  const [lines, setLines] = useState(Array.isArray(s.lines) && s.lines.length ? s.lines : [{ name: '', description: '', qty: 1, unit_price: 0 }]);
+  const [lines, setLines] = useState(Array.isArray(s.lines) && s.lines.length
+    ? s.lines.map(l => ({ ...l, unit_price: l.list_price ?? l.unit_price ?? 0, discount: l.discount ?? 0 }))
+    : [{ name: '', description: '', qty: 1, unit_price: 0, discount: 0 }]);
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const setLine = (i, k, v) => setLines(p => p.map((l, j) => j === i ? { ...l, [k]: v } : l));
   const locs = locations.filter(l => !f.company_id || l.company_id === f.company_id);
 
-  const subtotal = lines.reduce((sum, l) => sum + (Number(l.qty) || 0) * (Number(l.unit_price) || 0), 0);
+  const subtotal = lines.reduce((sum, l) => sum + (Number(l.qty) || 0) * (Number(l.unit_price) || 0) * (1 - (Number(l.discount) || 0) / 100), 0);
   const total = subtotal * (1 + Number(f.tax_rate || 0) / 100);
 
   const save = async () => {
@@ -211,7 +213,12 @@ function ScheduleModal({ schedule, companies, locations, contacts, products = []
       contact_id: f.contact_id || null, email_to: f.email_to.trim() || null,
       frequency: f.frequency, day_of_month: Math.min(28, Math.max(1, Number(f.day_of_month) || 1)),
       next_run: f.next_run, due_days: Number(f.due_days) || 14, tax_rate: Number(f.tax_rate) || 0,
-      lines: cleanLines.map(l => ({ name: l.name.trim(), description: (l.description || '').trim() || null, qty: Number(l.qty) || 1, unit_price: Number(l.unit_price) || 0 })),
+      lines: cleanLines.map(l => {
+        const list = Number(l.unit_price) || 0;
+        const disc = Math.min(100, Math.max(0, Number(l.discount) || 0));
+        // Store the discounted price the generator charges, plus list price + % for editing.
+        return { name: l.name.trim(), description: (l.description || '').trim() || null, qty: Number(l.qty) || 1, unit_price: +(list * (1 - disc / 100)).toFixed(4), list_price: list, discount: disc };
+      }),
       terms: f.terms.trim() || null, notes: f.notes.trim() || null,
       auto_send: f.auto_send, active: f.active, created_by: s.created_by || profile.id,
     };
@@ -271,7 +278,7 @@ function ScheduleModal({ schedule, companies, locations, contacts, products = []
                       const p = products.find(x => x.id === e.target.value);
                       if (p) setLines(prev => {
                         const blank = prev.length === 1 && !(prev[0].name || '').trim();
-                        const line = { name: p.name, description: p.description || '', qty: 1, unit_price: Number(p.default_price) || 0 };
+                        const line = { name: p.name, description: p.description || '', qty: 1, unit_price: Number(p.default_price) || 0, discount: 0 };
                         return blank ? [line] : [...prev, line];
                       });
                     }}>
@@ -279,7 +286,7 @@ function ScheduleModal({ schedule, companies, locations, contacts, products = []
                     {products.map(p => <option key={p.id} value={p.id}>{p.name} — £{Number(p.default_price).toLocaleString('en-GB')}</option>)}
                   </select>
                 )}
-                <button onClick={() => setLines(p => [...p, { name: '', description: '', qty: 1, unit_price: 0 }])}
+                <button onClick={() => setLines(p => [...p, { name: '', description: '', qty: 1, unit_price: 0, discount: 0 }])}
                   className="text-xs text-ember hover:text-ember-deep font-medium">+ Blank line</button>
               </div>
             </div>
@@ -290,13 +297,17 @@ function ScheduleModal({ schedule, companies, locations, contacts, products = []
                   <button onClick={() => setLines(p => p.filter((_, j) => j !== i))} title="Remove line" className="text-red-500 hover:text-red-600 text-lg leading-none shrink-0 px-1">&times;</button>
                 </div>
                 <input className={input + ' text-xs'} value={l.description || ''} onChange={e => setLine(i, 'description', e.target.value)} placeholder="Description (optional, shown on the invoice)" />
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <div><span className="text-[9px] text-muted block mb-0.5">Qty</span>
                     <input type="number" className={input} value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} placeholder="1" /></div>
                   <div><span className="text-[9px] text-muted block mb-0.5">Unit £ (ex VAT)</span>
                     <input type="number" className={input} value={l.unit_price} onChange={e => setLine(i, 'unit_price', e.target.value)} placeholder="0.00" /></div>
+                  <div><span className="text-[9px] text-muted block mb-0.5">Disc %</span>
+                    <input type="number" className={input} value={l.discount ?? 0} onChange={e => setLine(i, 'discount', e.target.value)} placeholder="0" /></div>
                 </div>
-                <div className="text-right text-xs text-muted">Line total: <span className="text-paper font-mono font-semibold">{money((Number(l.qty) || 0) * (Number(l.unit_price) || 0))}</span></div>
+                <div className="text-right text-xs text-muted">
+                  {(Number(l.discount) || 0) > 0 && <span className="text-dim line-through mr-1.5">{money((Number(l.qty) || 0) * (Number(l.unit_price) || 0))}</span>}
+                  Line total: <span className="text-paper font-mono font-semibold">{money((Number(l.qty) || 0) * (Number(l.unit_price) || 0) * (1 - (Number(l.discount) || 0) / 100))}</span></div>
               </div>
             ))}
             <div className="flex justify-end gap-4 text-sm pt-1">
