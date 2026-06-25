@@ -16,6 +16,7 @@ export default function PhoneBar({ profile }) {
   const deviceRef = useRef(null);
   const pendingCallRef = useRef(null);
   const autoOnlineRef = useRef(false);
+  const callActivityRef = useRef(null); // { id, startMs, number } for the in-progress outbound call
 
   useEffect(() => {
     supabase.from('support_settings').select('twilio_number').eq('id', 1).maybeSingle()
@@ -154,6 +155,28 @@ export default function PhoneBar({ profile }) {
       startTimer();
       setShowDialer(false);
 
+      // Log the outbound call so it shows in the Call Log (duration filled on hang-up).
+      // Best-effort link to a contact by the last 9 digits of the number.
+      (async () => {
+        try {
+          const tail = String(number).replace(/\D/g, '').slice(-9);
+          let subject_type = null, subject_id = null;
+          if (tail) {
+            const { data: cs } = await supabase.from('contacts').select('id')
+              .or(`phone.ilike.%${tail}%,mobile.ilike.%${tail}%`).limit(1);
+            if (cs && cs[0]) { subject_type = 'contact'; subject_id = cs[0].id; }
+          }
+          const { data: act } = await supabase.from('crm_activities').insert({
+            type: 'call', direction: 'outbound', actor_id: profile.id,
+            message_id: call?.parameters?.CallSid || null,
+            occurred_at: new Date().toISOString(), subject_type, subject_id,
+            body: `Outbound call to ${number}`,
+            channel_metadata: { to: number, status: 'in_progress', outcome: 'connected' },
+          }).select('id').single();
+          callActivityRef.current = act ? { id: act.id, startMs: Date.now(), number } : null;
+        } catch (e) { console.error('Outbound call log failed', e); }
+      })();
+
       call.on('disconnect', () => { endCall(); });
     } catch (err) {
       alert('Call failed: ' + err.message);
@@ -177,6 +200,16 @@ export default function PhoneBar({ profile }) {
   };
 
   const endCall = () => {
+    // Finalise the outbound call's log entry with its duration (reliable, no webhook needed).
+    const logged = callActivityRef.current;
+    if (logged) {
+      callActivityRef.current = null;
+      const dur = Math.max(0, Math.round((Date.now() - logged.startMs) / 1000));
+      supabase.from('crm_activities').update({
+        body: `Outbound call to ${logged.number} (${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, '0')})`,
+        channel_metadata: { to: logged.number, status: 'completed', outcome: 'connected', duration_seconds: dur },
+      }).eq('id', logged.id).then(() => {});
+    }
     if (timerRef.current) clearInterval(timerRef.current);
     setCallDuration(0);
     setActiveCall(null);
