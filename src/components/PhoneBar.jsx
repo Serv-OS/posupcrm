@@ -159,17 +159,28 @@ export default function PhoneBar({ profile }) {
       // Best-effort link to a contact by the last 9 digits of the number.
       (async () => {
         try {
+          // crm_activities.subject_type/subject_id are NOT NULL, so every call must
+          // attach to a contact. Resolve by the last 9 digits; create a lightweight
+          // contact if it's a new number (so the call always logs + you can name it later).
           const tail = String(number).replace(/\D/g, '').slice(-9);
-          let subject_type = null, subject_id = null;
+          let contactId = null;
           if (tail) {
             const { data: cs } = await supabase.from('contacts').select('id')
               .or(`phone.ilike.%${tail}%,mobile.ilike.%${tail}%`).limit(1);
-            if (cs && cs[0]) { subject_type = 'contact'; subject_id = cs[0].id; }
+            if (cs && cs[0]) contactId = cs[0].id;
           }
+          if (!contactId) {
+            const { data: nc } = await supabase.from('contacts')
+              .insert({ first_name: number, phone: number, source: 'outbound_call', owner_id: profile.id })
+              .select('id').single();
+            contactId = nc?.id || null;
+          }
+          if (!contactId) return;
           const { data: act } = await supabase.from('crm_activities').insert({
-            type: 'call', direction: 'outbound', actor_id: profile.id,
+            type: 'call', direction: 'outbound', actor_id: profile.id, is_internal: false,
+            subject_type: 'contact', subject_id: contactId,
             message_id: call?.parameters?.CallSid || null,
-            occurred_at: new Date().toISOString(), subject_type, subject_id,
+            occurred_at: new Date().toISOString(),
             body: `Outbound call to ${number}`,
             channel_metadata: { to: number, status: 'in_progress', outcome: 'connected' },
           }).select('id').single();
