@@ -59,11 +59,20 @@ export default function PhoneBar({ profile }) {
       newDevice.on('incoming', (call) => {
         setStatus('ringing');
         setActiveCall(call);
+        const callerName = call.customParameters?.get('callerName') || call.parameters.From || 'Unknown';
         setCallInfo({
           from: call.parameters.From || 'Unknown',
-          callerName: call.customParameters?.get('callerName') || call.parameters.From || 'Unknown',
+          callerName,
           callerNumber: call.customParameters?.get('callerNumber') || call.parameters.From,
         });
+        // Desktop notification (with the OS sound) so the call isn't missed when the
+        // tab is backgrounded or browser audio is still locked.
+        try {
+          if ('Notification' in window && Notification.permission === 'granted') {
+            const note = new Notification('\u{1F4DE} Incoming call', { body: callerName, requireInteraction: true, tag: 'servos-call' });
+            note.onclick = () => { window.focus(); note.close(); };
+          }
+        } catch { /* ignore */ }
 
         call.on('accept', () => {
           setStatus('on-call');
@@ -235,6 +244,24 @@ export default function PhoneBar({ profile }) {
     autoOnlineRef.current = true;
     goOnline();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Unlock browser audio on the first interaction (so the Twilio ringtone can play)
+  // and request notification permission, so incoming calls alert even when the tab
+  // is in the background. Mic access itself still needs a one-time browser "Allow".
+  useEffect(() => {
+    const unlock = () => {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) { const c = new Ctx(); if (c.state === 'suspended') c.resume(); }
+      } catch { /* ignore */ }
+      try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch { /* ignore */ }
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
   }, []);
 
   // Heartbeat: keep agent status fresh
