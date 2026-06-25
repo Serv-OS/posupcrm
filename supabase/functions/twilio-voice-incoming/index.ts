@@ -6,6 +6,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { phoneVariants, phoneMatchFilter } from "../_shared/phone.ts";
 
 // Escape text for safe inclusion inside a TwiML <Say>
 const xmlEscape = (s: string) =>
@@ -63,31 +64,17 @@ serve(async (req) => {
       );
     }
 
-    // Normalize phone number and generate all possible formats for matching
+    // Normalize phone number and generate all match formats (US + UK).
     const rawFrom = from?.replace(/\s/g, "") || "";
-    const phoneVariants: string[] = [];
-    if (rawFrom) {
-      phoneVariants.push(rawFrom);
-      // +447xxx -> 07xxx and 447xxx
-      if (rawFrom.startsWith("+44")) {
-        phoneVariants.push("0" + rawFrom.slice(3));
-        phoneVariants.push(rawFrom.slice(1)); // 447xxx
-      }
-      // 07xxx -> +447xxx and 447xxx
-      if (rawFrom.startsWith("0")) {
-        phoneVariants.push("+44" + rawFrom.slice(1));
-        phoneVariants.push("44" + rawFrom.slice(1));
-      }
-      // +1xxx (US) -> just keep as is
-    }
+    const variants = phoneVariants(from);
 
     // Match caller to a contact using all phone variants
     let contactId: string | null = null;
     let companyId: string | null = null;
     let callerName = from;
 
-    if (phoneVariants.length > 0) {
-      const phoneFilter = phoneVariants.map(p => `phone.eq.${p}`).join(",");
+    if (variants.length > 0) {
+      const phoneFilter = phoneMatchFilter(["phone"], from);
       const { data: contacts } = await supabase
         .from("contacts")
         .select("id, first_name, last_name, phone")
@@ -130,7 +117,7 @@ serve(async (req) => {
 
     if (normalizedFrom) {
       // Search for open tickets matching any phone variant
-      const ticketPhoneFilter = phoneVariants.map(p => `customer_phone.eq.${p}`).join(",");
+      const ticketPhoneFilter = phoneMatchFilter(["customer_phone"], from);
       const { data: openTickets } = await supabase
         .from("tickets")
         .select("id")
@@ -190,6 +177,7 @@ serve(async (req) => {
         subject: `Incoming call from ${callerName}`,
         subject_type: "ticket",
         subject_id: ticketId,
+        contact_id: contactId,
         direction: "inbound",
         message_id: callSid,
         is_internal: false,
