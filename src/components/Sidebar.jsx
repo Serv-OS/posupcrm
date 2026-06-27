@@ -6,7 +6,7 @@ import {
   Ticket, ClipboardList, FileText, LayoutGrid, Sparkles, Flag, BarChart3,
   Bug, Star, List, Layout, Layers, Package, ChevronRight, Plus, Mail, Calendar, MessageSquare, Clock, Plane, CreditCard, Receipt, TrendingUp,
   Warehouse, Boxes, PackagePlus, PackageMinus, ShoppingCart, ClipboardCheck, Truck, Factory,
-  Settings as SettingsIcon, Users as UsersIcon, FileSignature, PhoneCall
+  Settings as SettingsIcon, Users as UsersIcon, FileSignature, PhoneCall, Wallet, Tags, Percent
 } from 'lucide-react';
 
 // Collapsible groups (App Build is dynamic; My Work + My Account are pinned)
@@ -16,6 +16,10 @@ const COLLAPSIBLE = [
     ['leads', 'Leads', Target], ['deals', 'Deals', Banknote],
     ['processing', 'Card Processing', CreditCard], ['quotes', 'Quotes', FileSignature],
     ['invoices', 'Invoices', Receipt],
+  ] },
+  { id: 'finance', label: 'Finance', items: [
+    ['bills', 'Bills', Wallet], ['expenses', 'Expenses', Receipt], ['what_i_owe', 'What I owe', Banknote],
+    ['finance_categories', 'Categories', Tags], ['finance_rates', 'Tax rates', Percent],
   ] },
   { id: 'inventory', label: 'Inventory', items: [
     ['inv_dashboard', 'Dashboard', Warehouse], ['products', 'Products', Box], ['inv_stock', 'Stock', Boxes],
@@ -51,9 +55,10 @@ const ACTIVE_MAP = {
   onboarding_detail: 'onboarding', project_detail: 'projects', task_detail: 'tasks',
   ticket_detail: 'tickets', form_detail: 'forms', feature_request_detail: 'feature_requests',
   release_detail: 'releases', invoice_detail: 'invoices', quote_detail: 'quotes',
+  bill_detail: 'bills', expense_detail: 'expenses',
 };
 
-const DEFAULT_GROUPS = { appbuild: false, sales: true, inventory: true, delivery: false, support: false, product: false, workforce: false, insights: false };
+const DEFAULT_GROUPS = { appbuild: false, sales: true, finance: false, inventory: true, delivery: false, support: false, product: false, workforce: false, insights: false };
 
 export default function Sidebar({ profile, projects, activeProject, setActiveProject, view, setView, onSignOut, onRefresh, theme }) {
   const [logos, setLogos] = useState({ light: null, dark: null });
