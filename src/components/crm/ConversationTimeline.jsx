@@ -509,7 +509,7 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
         })}
       </div>
       {showJump && (
-        <button onClick={scrollToBottom} className="absolute bottom-3 right-4 z-10 flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-paper text-ink text-xs font-semibold shadow-lg hover:opacity-90 transition">↓ Latest</button>
+        <button onClick={scrollToBottom} className="absolute bottom-3 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-card text-ember-deep border border-bdr text-xs font-semibold shadow-md hover:bg-ember/10 transition">↓ Latest</button>
       )}
       </div>
 
