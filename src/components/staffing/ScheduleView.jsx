@@ -1,7 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
-import { ChevronLeft, ChevronRight, Users, LayoutGrid, Send, Plus, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Users, LayoutGrid, Send, Plus, Trash2, X, Copy } from 'lucide-react';
 import { isoDate, mondayOf, weekDays, DOW_SHORT, fmtRange, shiftHours, timeOffOnDate, isAssignable } from '../../lib/staffing';
+
+// Default times for a brand-new shift (operators can change per shift).
+const DEFAULT_SHIFT = { start: '08:30', finish: '16:30' };
 
 export default function ScheduleView({ profile }) {
   const [monday, setMonday] = useState(() => mondayOf(new Date()));
@@ -44,11 +47,30 @@ export default function ScheduleView({ profile }) {
     s.user_id === userId && s.date === iso && (areaFilter === 'all' || s.area_id === areaFilter));
   const hasDraft = shifts.some(s => s.status === 'draft');
 
-  const saveShift = async (data) => {
-    const row = { user_id: data.user_id, date: data.date, start_time: data.start_time, finish_time: data.finish_time, area_id: data.area_id || null, status: 'draft', updated_at: new Date().toISOString() };
-    if (data.id) await supabase.from('shifts').update(row).eq('id', data.id);
-    else await supabase.from('shifts').insert(row);
+  const saveShift = async (data, extraDates = []) => {
+    const base = { user_id: data.user_id, start_time: data.start_time, finish_time: data.finish_time, area_id: data.area_id || null, status: 'draft', updated_at: new Date().toISOString() };
+    if (data.id) await supabase.from('shifts').update({ ...base, date: data.date }).eq('id', data.id);
+    else await supabase.from('shifts').insert({ ...base, date: data.date });
+    // "Also add on" — copy the same shift onto the other chosen days.
+    const copies = [...new Set(extraDates)].filter(iso => iso && iso !== data.date).map(iso => ({ ...base, date: iso }));
+    if (copies.length) await supabase.from('shifts').insert(copies);
     setEditShift(null); load();
+  };
+
+  // Copy this whole week's rota forward N weeks (as drafts), then jump to it.
+  const copyWeek = async () => {
+    if (!canWrite) return;
+    if (!shifts.length) { alert('No shifts this week to copy.'); return; }
+    const ahead = parseInt(prompt('Copy this week’s rota forward how many weeks? (1 = next week)', '1') || '', 10);
+    if (!ahead || ahead < 1) return;
+    const plusWeeks = (iso) => { const [y, m, d] = iso.split('-').map(Number); return isoDate(new Date(y, m - 1, d + ahead * 7)); };
+    const copies = shifts.map(s => ({
+      user_id: s.user_id, area_id: s.area_id || null, start_time: s.start_time, finish_time: s.finish_time,
+      date: plusWeeks(s.date), status: 'draft', updated_at: new Date().toISOString(),
+    }));
+    const { error } = await supabase.from('shifts').insert(copies);
+    if (error) { alert('Could not copy week: ' + error.message); return; }
+    setMonday(m => { const x = new Date(m); x.setDate(x.getDate() + ahead * 7); return x; });
   };
   const deleteShift = async (id) => { await supabase.from('shifts').delete().eq('id', id); setEditShift(null); load(); };
 
@@ -92,6 +114,9 @@ export default function ScheduleView({ profile }) {
           <button onClick={() => setMode('area')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${mode === 'area' ? 'bg-ember text-white' : 'text-muted'}`}><LayoutGrid size={14} /> By area</button>
         </div>
         {canWrite && (
+          <button onClick={copyWeek} title="Copy this week's rota forward to a later week" className="btn-ghost px-3 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5"><Copy size={14} /> Copy week</button>
+        )}
+        {canWrite && (
           <button onClick={() => setShowPublish(true)} className="btn-glass px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5"><Send size={14} /> Publish rota</button>
         )}
       </div>
@@ -119,7 +144,7 @@ export default function ScheduleView({ profile }) {
       </div>
 
       {editShift && (
-        <ShiftModal shift={editShift} areas={areas} staff={staff} onSave={saveShift} onDelete={deleteShift} onClose={() => setEditShift(null)} />
+        <ShiftModal shift={editShift} days={days} areas={areas} staff={staff} onSave={saveShift} onDelete={deleteShift} onClose={() => setEditShift(null)} />
       )}
       {showPublish && (
         <PublishModal profile={profile} monday={monday} days={days} shifts={shifts} staff={staff} areas={areas}
@@ -223,7 +248,7 @@ function StaffRow({ p, days, todayIso, shiftsFor, areaById, timeOff, canWrite, s
                   );
                 })}
                 {canWrite && cellShifts.length === 0 && (
-                  <button onClick={() => setEditShift({ user_id: p.id, date: iso, start_time: '09:00', finish_time: '17:00', area_id: '' })}
+                  <button onClick={() => setEditShift({ user_id: p.id, date: iso, start_time: DEFAULT_SHIFT.start, finish_time: DEFAULT_SHIFT.finish, area_id: '' })}
                     className="opacity-0 group-hover:opacity-100 transition w-full h-full min-h-[40px] rounded-lg border-2 border-dashed border-bdr text-dim hover:border-ember hover:text-ember flex items-center justify-center">
                     <Plus size={16} />
                   </button>
@@ -264,7 +289,7 @@ function AreaMode({ filteredAreas, days, todayIso, shifts, staff, canWrite, setE
                     className="text-[10px] text-muted truncate cursor-pointer hover:text-paper">{nameOf(s.user_id)} · {s.start_time}–{s.finish_time}</div>
                 ))}
                 {gap > 0 && (
-                  <button onClick={() => canWrite && setEditShift({ user_id: '', date: iso, start_time: '09:00', finish_time: '17:00', area_id: area.id })}
+                  <button onClick={() => canWrite && setEditShift({ user_id: '', date: iso, start_time: DEFAULT_SHIFT.start, finish_time: DEFAULT_SHIFT.finish, area_id: area.id })}
                     className="mt-1 w-full text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 hover:bg-red-200">
                     Gap · need {gap}
                   </button>
@@ -279,8 +304,9 @@ function AreaMode({ filteredAreas, days, todayIso, shifts, staff, canWrite, setE
 }
 
 // ── Shift add/edit modal ────────────────────────────────────────────────────
-function ShiftModal({ shift, areas, staff, onSave, onDelete, onClose }) {
+function ShiftModal({ shift, days, areas, staff, onSave, onDelete, onClose }) {
   const [s, setS] = useState({ area_id: '', ...shift });
+  const [copyDays, setCopyDays] = useState(() => new Set());
   const area = areas.find(a => a.id === s.area_id);
   const assignable = staff.filter(p => isAssignable(p, area));
   const set = (k, v) => setS(prev => ({ ...prev, [k]: v }));
@@ -304,8 +330,27 @@ function ShiftModal({ shift, areas, staff, onSave, onDelete, onClose }) {
             <option value="">No area</option>
             {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select></div>
+        {days && days.length > 0 && (
+          <div><label className={label}>Also add on (copy to other days)</label>
+            <div className="flex flex-wrap gap-1.5">
+              {days.map((d, i) => {
+                const iso = isoDate(d);
+                if (iso === s.date) return null;
+                const on = copyDays.has(iso);
+                return (
+                  <button key={iso} type="button"
+                    onClick={() => setCopyDays(prev => { const n = new Set(prev); if (n.has(iso)) n.delete(iso); else n.add(iso); return n; })}
+                    className={`px-2 py-1 rounded-lg text-xs font-semibold border transition ${on ? 'bg-ember text-white border-ember' : 'bg-card text-muted border-bdr hover:text-paper'}`}>
+                    {DOW_SHORT[i]} {d.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+            {copyDays.size > 0 && <div className="text-[10px] text-dim mt-1">Adds {copyDays.size} more shift{copyDays.size > 1 ? 's' : ''} with the same details.</div>}
+          </div>
+        )}
         <div className="flex items-center gap-2 pt-1">
-          <button disabled={!valid} onClick={() => onSave(s)} className="btn-glass px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-50">Save</button>
+          <button disabled={!valid} onClick={() => onSave(s, [...copyDays])} className="btn-glass px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-50">Save</button>
           <button onClick={onClose} className="btn-ghost px-4 py-2 rounded-xl text-sm">Cancel</button>
           {s.id && <button onClick={() => onDelete(s.id)} className="ml-auto text-red-600 hover:bg-red-50 p-2 rounded-xl"><Trash2 size={16} /></button>}
         </div>
