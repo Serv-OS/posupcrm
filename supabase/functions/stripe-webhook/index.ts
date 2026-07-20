@@ -51,7 +51,7 @@ async function createPaidInvoiceForQuote(supabase: any, quoteId: string, paidAmo
   if (recipient) {
     const { data: seller } = await supabase.from("support_settings")
       .select("business_name, business_email, business_phone, quote_accent, logo_url").eq("id", 1).maybeSingle();
-    const appUrl = Deno.env.get("APP_URL") || "https://posupject.vercel.app";
+    const appUrl = Deno.env.get("APP_URL") || "https://posupcrm.vercel.app";
     const { subject, html } = invoiceEmailHtml(inv, seller || {}, `${appUrl}/i/${inv.public_token}`, { paid: inv.status === "paid" });
     await sendInvoiceEmail(supabase, recipient, subject, html);
     await supabase.from("invoices").update({ sent_at: new Date().toISOString(), email_to: recipient }).eq("id", inv.id);
