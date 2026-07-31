@@ -15,6 +15,9 @@ export default function ChatSitesCard({ profile }) {
   const [sites, setSites] = useState([]);
   const [locations, setLocations] = useState([]);
   const [adding, setAdding] = useState(null);
+  const [kbCount, setKbCount] = useState(null);
+  const [learning, setLearning] = useState(false);
+  const [learned, setLearned] = useState('');
   const [copied, setCopied] = useState('');
   const [err, setErr] = useState('');
 
@@ -30,6 +33,8 @@ export default function ChatSitesCard({ profile }) {
       supabase.from('locations').select('id, name').order('name'),
     ]);
     if (p.error) setErr(p.error.message);
+    const { count } = await supabase.from('kb_docs').select('id', { count: 'exact', head: true }).eq('active', true);
+    setKbCount(count ?? 0);
     setPb(p.data || null);
     setSites(s.data || []);
     setLocations(l.data || []);
@@ -71,6 +76,25 @@ export default function ChatSitesCard({ profile }) {
     if (!confirm(`Delete the "${s.label}" embed?\n\nAny site still using this key will stop working.`)) return;
     await supabase.from('chat_sites').delete().eq('id', s.id);
     load();
+  };
+
+  // Distil resolved tickets into reusable answers (runs server-side).
+  const learn = async () => {
+    setLearning(true); setLearned(''); setErr('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kb-ingest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ limit: 25 }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Could not read the tickets.');
+      setLearned(`Learned ${d.learned} new answer${d.learned === 1 ? '' : 's'} from ${d.considered} ticket${d.considered === 1 ? '' : 's'}.` +
+        (d.skipped_no_answer ? ` ${d.skipped_no_answer} had no reply to learn from.` : ''));
+      load();
+    } catch (e) { setErr(e.message); }
+    setLearning(false);
   };
 
   const copy = (text, tag) => {
@@ -203,6 +227,25 @@ export default function ChatSitesCard({ profile }) {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* ── Knowledge ──────────────────────────────────────────────────── */}
+        <div className="pt-1 border-t border-bdr">
+          <div className="flex items-center gap-2 mt-4 mb-1">
+            <div className="text-sm font-medium text-paper">What it knows</div>
+            <span className="text-xs text-dim font-mono">({kbCount ?? '…'} answers)</span>
+            {canWrite && (
+              <button onClick={learn} disabled={learning}
+                className="ml-auto text-xs text-ember hover:text-ember-deep font-medium disabled:opacity-50">
+                {learning ? 'Reading tickets…' : 'Learn from resolved tickets'}
+              </button>
+            )}
+          </div>
+          <div className="text-xs text-muted">
+            It can only answer from what it has learned — anything else goes to a person. Every resolved
+            ticket with a real reply becomes a reusable answer.
+          </div>
+          {learned && <div className="text-xs text-emerald-600 mt-1">{learned}</div>}
         </div>
 
         {/* ── Playbook ───────────────────────────────────────────────────── */}

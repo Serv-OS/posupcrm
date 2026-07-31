@@ -283,8 +283,14 @@ serve(async (req) => {
       const { data: mods } = await supabase.from("location_modules")
         .select("status, module:modules(name)").eq("location_id", location.id);
       const live = (mods || []).filter((m: any) => m.status === "live").map((m: any) => m.module?.name).filter(Boolean);
+      // What hardware is actually deployed there, so it can talk about the real kit.
+      const { data: kit } = await supabase.from("inv_serials")
+        .select("product_name, category, serial").eq("location_id", location.id).limit(40);
+      const kitLine = (kit || []).length
+        ? ` Hardware on site: ${[...new Set((kit || []).map((k: any) => k.product_name).filter(Boolean))].join(", ")}.`
+        : "";
       venueBlock = `The customer is at ${location.name}${location.city ? `, ${location.city}` : ""}.` +
-        (live.length ? ` Live modules there: ${live.join(", ")}.` : "");
+        (live.length ? ` Live modules there: ${live.join(", ")}.` : "") + kitLine;
     } else if (pb.ask_location) {
       venueBlock =
         `You do NOT know which venue the customer is at. Ask before troubleshooting.\n` +
@@ -294,6 +300,24 @@ serve(async (req) => {
     } else {
       venueBlock = "The venue is not needed for this chat.";
     }
+
+    // What we already know about this kind of problem. Retrieval is over our own
+    // resolved tickets and written how-tos — the assistant may only answer from
+    // these, so it can't invent a fix.
+    const problem = (history || []).filter((m) => m.role === "visitor")
+      .slice(-4).map((m) => m.content).join(" ").slice(0, 400);
+    let knowledge: any[] = [];
+    if (problem.trim().length > 8) {
+      const { data: kb } = await supabase.rpc("kb_search", { q: problem, loc: session.location_id, lim: 5 });
+      knowledge = kb || [];
+    }
+    const knowledgeBlock = knowledge.length
+      ? `KNOWN FIXES — these come from problems we have actually solved before. ` +
+        `Answer from these when one fits, in your own words, as clear steps.\n` +
+        knowledge.map((k: any, i: number) =>
+          `[${i + 1}] ${k.title || k.question}\nProblem: ${k.question}\nFix: ${k.answer}`).join("\n\n")
+      : `KNOWN FIXES: nothing on file matches this yet. Ask diagnostic questions if that would help ` +
+        `narrow it down, but do NOT invent a fix — signal needs_human once you understand the problem.`;
 
     const contactBlock = haveContact()
       ? "You already have their contact details."
@@ -305,6 +329,7 @@ serve(async (req) => {
       `TONE: ${pb.tone}. Short sentences, warm, natural. Never bullet-point essays. ` +
       `Never claim to be human — if asked outright whether you're a bot, say so plainly and offer a colleague.\n\n` +
       `WHAT YOU KNOW\n${venueBlock}\n${contactBlock}\n\n` +
+      `${knowledgeBlock}\n\n` +
       `HOW TO WORK\n` +
       `- Your FIRST job is to understand the problem, not to hand it over. Ask short, specific questions ` +
       `until you know which venue they're at and what is actually happening. One question at a time.\n` +
@@ -315,7 +340,8 @@ serve(async (req) => {
       `RULES\n` +
       `- If you get the venue wrong and they correct you, apologise in one line and ask again. Never insist.\n` +
       `- Never invent prices, dates, refunds, contract terms, or promises about fixes.\n` +
-      `- Never guess an answer. When you're genuinely stuck, signal NEEDS_HUMAN.\n` +
+      `- Only give a fix that comes from KNOWN FIXES above. If none of them fit, do not improvise ` +
+      `a fix from general knowledge — say you'll get a person onto it.\n` +
       `- Keep replies under 90 words.\n\n` +
       `STATE LINE — REQUIRED. End EVERY reply with exactly one final line in this format. ` +
       `It is stripped out and the customer never sees it. Use "-" for anything you don't know yet:\n` +
