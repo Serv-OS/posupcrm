@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat widget — demo</title>
+<style>
+  body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         margin: 0; color: #16211c; background: #fff; }
+  header { background: #16211c; color: #fff; padding: 40px 24px; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 24px 120px; }
+  h1 { margin: 0 0 6px; font-size: 26px; }
+  code { background: #f2f5f3; padding: 2px 6px; border-radius: 6px; font-size: 14px; }
+  pre { background: #f2f5f3; padding: 14px; border-radius: 10px; overflow-x: auto; font-size: 13px; }
+  .note { border-left: 3px solid #15C26A; padding-left: 14px; color: #46524b; }
+</style>
+</head>
+<body>
+  <header><h1>Demo site</h1><div>A stand-in customer website, to prove the widget on a real page.</div></header>
+  <main>
+    <p class="note">The bubble is bottom-right. This page exists only to test the popup embed —
+    it is not part of the CRM.</p>
+    <h3>Popup embed (what a customer site uses)</h3>
+    <pre>&lt;script src="https://posupcrm.vercel.app/chat.js"
+        data-site-key="YOUR_KEY" defer&gt;&lt;/script&gt;</pre>
+    <h3>Always-open, for a POS screen</h3>
+    <pre>/support-chat.html?key=YOUR_KEY</pre>
+    <p>Some filler so the page scrolls behind the widget. Lorem ipsum dolor sit amet, consectetur
+    adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad
+    minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+    <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla
+    pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt
+    mollit anim id est laborum.</p>
+  </main>
+  <script src="chat.js" data-site-key="posupcrm_test_key" data-title="ServOS Support" defer></script>
+</body>
+</html>
