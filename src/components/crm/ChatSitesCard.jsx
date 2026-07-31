@@ -21,6 +21,8 @@ export default function ChatSitesCard({ profile }) {
   const [modules, setModules] = useState([]);
   const [teach, setTeach] = useState({ url: '', text: '', module: '' });
   const [teaching, setTeaching] = useState(false);
+  const [docs, setDocs] = useState([]);
+  const [showDocs, setShowDocs] = useState(false);
   const [copied, setCopied] = useState('');
   const [err, setErr] = useState('');
 
@@ -40,6 +42,10 @@ export default function ChatSitesCard({ profile }) {
     setKbCount(count ?? 0);
     const { data: mods } = await supabase.from('modules').select('name').order('name');
     setModules((mods || []).map(m => m.name));
+    const { data: kd } = await supabase.from('kb_docs')
+      .select('id,title,question,module,category,first_line,internal_only,source')
+      .order('first_line', { ascending: false }).order('created_at', { ascending: false }).limit(200);
+    setDocs(kd || []);
     setPb(p.data || null);
     setSites(s.data || []);
     setLocations(l.data || []);
@@ -127,6 +133,17 @@ export default function ChatSitesCard({ profile }) {
       load();
     } catch (e) { setErr(e.message); }
     setTeaching(false);
+  };
+
+  const saveDoc = async (id, patch) => {
+    setDocs(ds => ds.map(d => d.id === id ? { ...d, ...patch } : d));
+    const { error } = await supabase.from('kb_docs').update(patch).eq('id', id);
+    if (error) setErr(error.message);
+  };
+  const removeDoc = async (d) => {
+    if (!confirm(`Delete "${d.title || d.question}"?`)) return;
+    await supabase.from('kb_docs').delete().eq('id', d.id);
+    load();
   };
 
   const copy = (text, tag) => {
@@ -278,6 +295,39 @@ export default function ChatSitesCard({ profile }) {
             ticket with a real reply becomes a reusable answer.
           </div>
           {learned && <div className="text-xs text-emerald-600 mt-1">{learned}</div>}
+
+          {docs.length > 0 && (
+            <div className="mt-2">
+              <button onClick={() => setShowDocs(v => !v)} className="text-xs text-ember hover:text-ember-deep font-medium">
+                {showDocs ? 'Hide' : 'Review'} what it knows ({docs.length})
+              </button>
+              {showDocs && (
+                <div className="mt-2 max-h-72 overflow-y-auto space-y-1">
+                  {docs.map(d => (
+                    <div key={d.id} className="glass-inner rounded-xl px-3 py-2 flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-paper truncate">{d.title || d.question}</div>
+                        <div className="text-[10px] text-dim truncate">
+                          {[d.module, d.category, d.source === 'ticket' ? 'from a ticket' : d.source === 'doc' ? 'from docs' : 'added by hand'].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                      <button onClick={() => saveDoc(d.id, { first_line: !d.first_line })} disabled={!canWrite}
+                        title="Try this first for that symptom"
+                        className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded shrink-0 ${d.first_line ? 'bg-ember text-white' : 'bg-card text-dim'}`}>
+                        Try first
+                      </button>
+                      <button onClick={() => saveDoc(d.id, { internal_only: !d.internal_only })} disabled={!canWrite}
+                        title="Staff only — never said to a customer"
+                        className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded shrink-0 ${d.internal_only ? 'bg-amber-500 text-white' : 'bg-card text-dim'}`}>
+                        Staff only
+                      </button>
+                      {canWrite && <button onClick={() => removeDoc(d)} className="text-red-500 hover:text-red-600 text-xs shrink-0">×</button>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {canWrite && (
             <div className="glass-inner rounded-xl p-3 mt-3 space-y-2">

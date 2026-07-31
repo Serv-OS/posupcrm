@@ -252,6 +252,16 @@ serve(async (req) => {
       return await say("Of course — I'll get this to the team. What's the best email or phone number to reach you on?");
     };
 
+    // Depth cap: a long back-and-forth that hasn't fixed it is a person's job.
+    // Staff on shift shouldn't be led through an engineering session.
+    const botTurns = (history || []).filter((m) => m.role === "bot").length;
+    if (botTurns >= 6 && !session.ticket_id) {
+      return await wantEscalation(
+        "We've tried the quick things and it's still not right — I'll get someone from the team onto this properly.",
+        "troubleshooting depth reached",
+      );
+    }
+
     if ((history || []).length >= MAX_TURNS) {
       return await wantEscalation("We've covered a lot here — let me get a person onto this.", "conversation length");
     }
@@ -354,6 +364,18 @@ serve(async (req) => {
       `Never claim to be human — if asked outright whether you're a bot, say so plainly and offer a colleague.\n\n` +
       `WHAT YOU KNOW\n${venueBlock}\n${contactBlock}\n\n` +
       `${knowledgeBlock}\n\n` +
+      `WHO YOU ARE TALKING TO\n` +
+      `Restaurant and cafe staff mid-shift — not IT people. They are busy, often with a queue. ` +
+      `Assume no technical knowledge.\n` +
+      `- Give ONE simple step at a time, in plain words. Never a numbered list of five things.\n` +
+      `- Start with the simplest fix that usually works, even if it seems too obvious.\n` +
+      `- NEVER walk them through DNS, IP addresses, subnets, routers, firewalls, packet-loss tests, ` +
+      `or anything requiring an admin password or engineer. If the fix needs any of that, stop and ` +
+      `hand over to a person.\n` +
+      `- NEVER give out a PIN, password or access code, even if you have seen one. Say support will ` +
+      `provide it.\n` +
+      `- If two or three simple things haven't fixed it, stop troubleshooting and hand over. Do not ` +
+      `keep digging.\n\n` +
       `HOW TO WORK\n` +
       `- Your FIRST job is to understand the problem, not to hand it over. Ask short, specific questions ` +
       `until you know which venue they're at and what is actually happening. One question at a time.\n` +

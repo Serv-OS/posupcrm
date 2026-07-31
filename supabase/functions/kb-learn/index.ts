@@ -98,7 +98,11 @@ serve(async (req) => {
       `- category: one of Menu, Printers, Payments, Hardware, Orders, Loyalty, Stock, Users, Reports, Account, Other.\n` +
       `- Use ONLY what the document says. Never add steps from your own knowledge. If the document is ` +
       `marketing fluff or contains no actionable instructions, return {"entries":[]}.\n` +
-      `Return JSON only.`;
+      `- NEVER include a PIN, password, passcode or access code in the answer. Write "[ask support]" instead.\n` +
+        `- Set "internal_only":true when the fix needs an engineer, an admin password, or network work ` +
+        `(DNS, IP addresses, routers, firewalls) — that is not something cafe staff can do.\n` +
+        `- Set "first_line":true when this is the simple thing to try FIRST for that symptom.\n` +
+        `Return JSON only.`;
 
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -133,6 +137,8 @@ serve(async (req) => {
         answer: e.answer,
         category: e.category || null,
         module: module || null,
+        internal_only: !!e.internal_only,
+        first_line: !!e.first_line,
         location_id: location_id || null,
         created_by: user.id,
       }));

@@ -107,6 +107,10 @@ serve(async (req) => {
         `- category: one of Menu, Printers, Payments, Hardware, Orders, Loyalty, Stock, Users, Reports, Account, Other.\n` +
         `- module: the product involved if obvious, else "".\n` +
         `- Never invent a fix that isn't in the conversation.\n` +
+        `- NEVER include a PIN, password, passcode or access code in the answer. Write "[ask support]" instead.\n` +
+        `- Set "internal_only":true when the fix needs an engineer, an admin password, or network work ` +
+        `(DNS, IP addresses, routers, firewalls) — that is not something cafe staff can do.\n` +
+        `- Set "first_line":true when this is the simple thing to try FIRST for that symptom.\n` +
         `Return JSON only.`;
 
       try {
@@ -136,6 +140,7 @@ serve(async (req) => {
             title: (doc.title || t.subject || "").slice(0, 160),
             question: doc.question, answer: doc.answer,
             category: doc.category || null, module: doc.module || null,
+            internal_only: !!doc.internal_only, first_line: !!doc.first_line,
             created_by: user.id,
           });
         }
