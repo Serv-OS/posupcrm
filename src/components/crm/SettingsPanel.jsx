@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { TEAM_OPTIONS, TEAM_LABELS } from '../UsersPanel.jsx';
 import AiSettingsCard from './AiSettingsCard.jsx';
+import ChatSitesCard from './ChatSitesCard.jsx';
 import BrandingCard from './BrandingCard.jsx';
 
 import { getGoogleClientId } from '../../lib/googleClientId';
@@ -212,6 +213,9 @@ export default function SettingsPanel({ profile }) {
 
           {/* AI Assistant (Claude) */}
           <AiSettingsCard profile={profile} />
+
+          {/* Website / POS support chat — embeds + playbook */}
+          <ChatSitesCard profile={profile} />
 
           {/* Payments (Stripe) */}
           <div className="glass-card rounded-2xl overflow-hidden">
