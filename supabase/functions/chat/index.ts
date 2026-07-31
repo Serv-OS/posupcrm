@@ -1,14 +1,21 @@
 // chat — the public support bot behind the embeddable widget.
 //
 // Runs as service_role (the chat_* tables have no anon policy on purpose), so
-// every request is validated here: site key must exist, be active, and the
+// every request is validated here: the site key must exist, be active, and the
 // caller's Origin must be in the site's allow-list.
 //
-// Two rules drive the behaviour, per AI_CHATBOT_PLAN.md:
-//   1. Know the location before answering. A site can be BOUND to a venue
-//      (POS tills), in which case there is nothing to ask.
-//   2. Never guess. Anything it can't ground, or that the playbook forbids,
-//      becomes a real ticket for a human.
+// DESIGN — the model runs the conversation, the code enforces the rules.
+// An earlier version identified the venue by matching words from site names
+// against the customer's text. "Something is broken" matched the venue
+// "Alfresco Works - Broke 'n Bone" ("broke" sits inside "broken"), and being
+// corrected with "that's not where I'm from" just made it give up and raise a
+// ticket with no venue and no contact details. Understanding language is the
+// model's job. Code only enforces what must never be got wrong:
+//
+//   1. No answering a support question until the venue is known.
+//   2. No raising a ticket until we can actually contact the person.
+//   3. Forbidden and urgent topics never reach the model at all.
+//   4. Anything unresolved still becomes a ticket — nothing is dropped.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -21,8 +28,8 @@ const cors = {
 const json = (b: unknown, s = 200) =>
   new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 
-const MAX_TURNS = 40;          // hard stop per session — runaway/loop guard
-const HISTORY_TURNS = 12;      // how much context we send the model
+const MAX_TURNS = 40;
+const HISTORY_TURNS = 14;
 
 type Playbook = {
   enabled: boolean; greeting: string; tone: string; ask_location: boolean;
@@ -30,27 +37,17 @@ type Playbook = {
   unknown_reply: string;
 };
 
-/** Find which venue the customer means. Exact name first; otherwise match on
- *  distinctive words (>=4 chars) from the site name, since "Alfred Works - Baity"
- *  is said as "Baity". Returns every equally-good candidate so the caller can
- *  disambiguate rather than guess. */
-function matchLocations(text: string, locs: any[]): any[] {
-  const low = (text || "").toLowerCase();
-  if (!low.trim()) return [];
-  const exact = locs.filter((l) => l.name && low.includes(String(l.name).toLowerCase()));
-  if (exact.length) return exact;
-
-  const scored = locs.map((l) => {
-    const toks = String(l.name || "").toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 4);
-    const hits = toks.filter((t) => low.includes(t)).length;
-    return { l, hits };
-  }).filter((s) => s.hits > 0);
-  if (!scored.length) return [];
-  const best = Math.max(...scored.map((s) => s.hits));
-  return scored.filter((s) => s.hits === best).map((s) => s.l);
+/** Whole-word keyword match, so "broke" can never fire on "broken". */
+function hitsKeyword(text: string, list: string[]): string | null {
+  const low = ` ${text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ")} `;
+  for (const raw of list || []) {
+    const k = (raw || "").toLowerCase().trim().replace(/\s+/g, " ");
+    if (!k) continue;
+    if (low.includes(` ${k} `)) return raw;
+  }
+  return null;
 }
 
-/** Origin must match the site's allow-list. Empty list = unrestricted (dev). */
 function originAllowed(origin: string | null, allowed: string[]): boolean {
   if (!allowed?.length) return true;
   if (!origin) return false;
@@ -62,6 +59,43 @@ function originAllowed(origin: string | null, allowed: string[]): boolean {
   });
 }
 
+/** Every reply ends with one STATE line carrying what the model established:
+ *    STATE: venue=<exact name|->; name=<name|->; contact=<email/phone|->; needs_human=<yes|no>
+ *  A single mandatory line is complied with far more reliably than a set of
+ *  optional ones (the optional version was simply never emitted). It is parsed
+ *  out and never shown to the customer. */
+function readSignals(raw: string) {
+  const out = { venue: "", contact: "", name: "", needsHuman: false, text: "" };
+  const keep: string[] = [];
+  for (const line of (raw || "").split("\n")) {
+    const t = line.trim();
+    const m = t.match(/^STATE:\s*(.*)$/i);
+    if (!m) {
+      // Tolerate the older one-signal-per-line style too.
+      if (/^NEEDS_HUMAN\b/i.test(t)) { out.needsHuman = true; continue; }
+      const v = t.match(/^VENUE:\s*(.+)$/i);
+      if (v) { out.venue = v[1].trim(); continue; }
+      keep.push(line);
+      continue;
+    }
+    for (const part of m[1].split(";")) {
+      const [kRaw, ...rest] = part.split("=");
+      const k = (kRaw || "").trim().toLowerCase();
+      const v = rest.join("=").trim();
+      if (!v || v === "-" || /^(none|unknown|n\/a)$/i.test(v)) continue;
+      if (k === "venue") out.venue = v;
+      else if (k === "name") out.name = v;
+      else if (k === "contact") out.contact = v;
+      else if (k === "needs_human") out.needsHuman = /^(yes|true)$/i.test(v);
+    }
+  }
+  out.text = keep.join("\n").trim();
+  return out;
+}
+
+const looksLikeEmail = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.trim());
+const looksLikePhone = (s: string) => s.replace(/\D/g, "").length >= 9;
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -72,11 +106,9 @@ serve(async (req) => {
   );
 
   try {
-    const body = await req.json();
-    const { site_key, session_id, message, visitor } = body || {};
+    const { site_key, session_id, message, visitor } = (await req.json()) || {};
     if (!site_key) return json({ error: "Missing site_key" }, 422);
 
-    // ── Site + origin ───────────────────────────────────────────────────────
     const { data: site } = await supabase.from("chat_sites")
       .select("*").eq("site_key", site_key).eq("active", true).maybeSingle();
     if (!site) return json({ error: "Unknown or inactive site key" }, 403);
@@ -90,7 +122,7 @@ serve(async (req) => {
     const pb = (pbRow || {}) as Playbook;
     if (pb.enabled === false) return json({ error: "Chat is turned off." }, 503);
 
-    // ── Session (created on first contact; venue inherited from a bound site) ─
+    // ── Session ─────────────────────────────────────────────────────────────
     let session: any = null;
     if (session_id) {
       const { data } = await supabase.from("chat_sessions").select("*").eq("id", session_id).maybeSingle();
@@ -105,7 +137,6 @@ serve(async (req) => {
         visitor_email: visitor?.email || null,
       }).select().single();
       session = data;
-      // Opening turn: greet, nothing to answer yet.
       if (!message) {
         await supabase.from("chat_messages").insert({ session_id: session.id, role: "bot", content: pb.greeting });
         return json({ session_id: session.id, reply: pb.greeting, escalated: false });
@@ -119,10 +150,7 @@ serve(async (req) => {
 
     const { data: history } = await supabase.from("chat_messages")
       .select("role, content, created_at").eq("session_id", session.id).order("created_at", { ascending: true });
-    const turns = (history || []).length;
 
-    // Mirror a chat line into the ticket's conversation thread, so it reads as a
-    // real conversation in the CRM instead of a wall of text in the description.
     const mirror = (ticketId: string, role: string, content: string, at?: string) =>
       supabase.from("crm_activities").insert({
         type: "chat",
@@ -136,12 +164,18 @@ serve(async (req) => {
         occurred_at: at || new Date().toISOString(),
       });
 
-    // Already escalated? Keep the ticket's thread live as the chat continues.
     if (session.ticket_id) await mirror(session.ticket_id, "visitor", text);
 
-    // Anything that ends the conversation writes a ticket and says so.
+    const say = async (reply: string) => {
+      await supabase.from("chat_messages").insert({ session_id: session.id, role: "bot", content: reply });
+      if (session.ticket_id) await mirror(session.ticket_id, "bot", reply);
+      await supabase.from("chat_sessions").update({ last_at: new Date().toISOString() }).eq("id", session.id);
+      return json({ session_id: session.id, reply, escalated: false });
+    };
+
+    const haveContact = () => !!(session.visitor_email || session.visitor_phone);
+
     const escalate = async (reply: string, reason: string) => {
-      // One ticket per chat: a second escalation adds to the same thread.
       let ticket: any = null;
       if (session.ticket_id) {
         const { data } = await supabase.from("tickets").select("id, ticket_number").eq("id", session.ticket_id).maybeSingle();
@@ -149,23 +183,34 @@ serve(async (req) => {
       }
 
       if (!ticket) {
-        // The subject should be the problem, not "hi" — take the meatiest thing
-        // the customer said, ignoring greetings and the venue name they gave.
+        // Subject = the problem they first described, not a later aside like
+        // "that's not where I'm from".
         const said = (history || []).filter((m) => m.role === "visitor").map((m) => m.content.trim());
-        const meaty = said.filter((s) => s.length > 15 && !/^(hi|hey|hello|thanks|ok)\b/i.test(s));
-        const subjectSrc = (meaty.sort((a, b) => b.length - a.length)[0]) || text;
-        // NB: tickets have no location_id column — the venue is linked through
-        // `associations`, same as the rest of the CRM.
+        const meaty = said.find((s) => s.length > 12 && !/^(hi|hey|hello|thanks|ok|yes|no)\b/i.test(s));
+        const { data: loc } = session.location_id
+          ? await supabase.from("locations").select("name").eq("id", session.location_id).maybeSingle()
+          : { data: null };
+
+        const header = [
+          `Raised from the website chat — ${reason}.`,
+          loc?.name ? `Venue: ${loc.name}` : "Venue: not identified.",
+          haveContact()
+            ? `Contact: ${[session.visitor_name, session.visitor_email, session.visitor_phone].filter(Boolean).join(" · ")}`
+            : "No contact details were given.",
+          "The full conversation is in the thread below.",
+        ].join("\n");
+
         const { data: created, error: tErr } = await supabase.from("tickets").insert({
-          subject: subjectSrc.slice(0, 120),
-          description: `Raised from the website chat — ${reason}. The full conversation is in the thread below.`,
+          subject: (meaty || text).slice(0, 120),
+          description: header,
           channel: "chat",
           source: "chat",
-          customer_email: session.visitor_email || visitor?.email || null,
+          customer_email: session.visitor_email || null,
+          customer_phone: session.visitor_phone || null,
           contact_id: session.contact_id,
         }).select("id, ticket_number").maybeSingle();
 
-        // The whole safety net is "it raises a ticket" — never let that fail quietly.
+        // The whole safety net is "it raises a ticket" — never fail quietly.
         if (tErr || !created) {
           console.error("chat: ESCALATION FAILED to create a ticket:", tErr?.message || "no row returned");
         }
@@ -175,129 +220,109 @@ serve(async (req) => {
           await supabase.from("stage_history").insert({
             object_type: "ticket", object_id: ticket.id, from_stage: null, to_stage: "new",
           });
+          // Only ever claim a venue that was actually confirmed.
           if (session.location_id) {
             await supabase.from("associations").insert({
               from_type: "ticket", from_id: ticket.id,
               to_type: "location", to_id: session.location_id, label: "affected_location",
             });
           }
-          // Replay the whole chat into the ticket's conversation thread.
           for (const m of (history || [])) await mirror(ticket.id, m.role, m.content, m.created_at);
         }
       }
+
       const withNumber = ticket?.ticket_number ? `${reply} (Reference #${ticket.ticket_number}.)` : reply;
       await supabase.from("chat_messages").insert({
         session_id: session.id, role: "bot", content: withNumber, escalated: true,
       });
       if (ticket) await mirror(ticket.id, "bot", withNumber);
       await supabase.from("chat_sessions").update({
-        status: "escalated", ticket_id: ticket?.id || null, last_at: new Date().toISOString(),
+        status: "escalated", ticket_id: ticket?.id || null,
+        pending_reason: null, last_at: new Date().toISOString(),
       }).eq("id", session.id);
       return json({ session_id: session.id, reply: withNumber, escalated: true, ticket_number: ticket?.ticket_number || null });
     };
 
-    if (turns >= MAX_TURNS) {
-      return await escalate("We've covered a lot here — let me get a person onto this.", "conversation length");
+    // Rule 2: never raise a ticket nobody can reply to. Ask once — if they still
+    // give nothing, raise it anyway so the problem is never lost.
+    const wantEscalation = async (reply: string, reason: string) => {
+      if (haveContact() || session.pending_reason) return await escalate(reply, reason);
+      await supabase.from("chat_sessions").update({ pending_reason: reason }).eq("id", session.id);
+      session.pending_reason = reason;
+      return await say("Of course — I'll get this to the team. What's the best email or phone number to reach you on?");
+    };
+
+    if ((history || []).length >= MAX_TURNS) {
+      return await wantEscalation("We've covered a lot here — let me get a person onto this.", "conversation length");
     }
 
-    // ── Rule 2, checked BEFORE the model: forbidden topics never get an answer ─
-    const lower = text.toLowerCase();
-    const hit = (list: string[]) => (list || []).find((k) => k && lower.includes(k.toLowerCase()));
-    const urgent = hit(pb.always_escalate || []);
+    // ── Rule 3: topic rules, before the model is asked anything ─────────────
+    const urgent = hitsKeyword(text, pb.always_escalate || []);
     if (urgent) {
-      return await escalate(
-        "That sounds urgent — I'm raising this with our support team right now so someone can call you back.",
-        `urgent keyword: ${urgent}`,
-      );
+      return await wantEscalation("That sounds urgent — I'm getting this straight to our support team.", `urgent keyword: ${urgent}`);
     }
-    const forbidden = hit(pb.never_answer || []);
-    if (forbidden) {
-      return await escalate(pb.unknown_reply, `restricted topic: ${forbidden}`);
-    }
+    const forbidden = hitsKeyword(text, pb.never_answer || []);
+    if (forbidden) return await wantEscalation(pb.unknown_reply, `restricted topic: ${forbidden}`);
 
-    // ── Rule 1: no venue, no answer ─────────────────────────────────────────
+    // ── Context for the model ───────────────────────────────────────────────
+    const { data: cfg } = await supabase.from("ai_settings").select("*").eq("id", 1).maybeSingle();
+    if (!cfg?.enabled || !cfg?.api_key) return await wantEscalation(pb.unknown_reply, "AI not configured");
+
     let location: any = null;
     if (session.location_id) {
       const { data } = await supabase.from("locations").select("id, name, city").eq("id", session.location_id).maybeSingle();
       location = data;
     }
-    if (!location && pb.ask_location) {
-      // Recognise the venue from what they typed. Sites are named like
-      // "Alfred Works - Baity", but people say "Baity" — so fall back to
-      // distinctive word matching, and ask again if it's ambiguous.
-      const { data: locs } = await supabase.from("locations").select("id, name, city").limit(1000);
-      const candidates = matchLocations(text, locs || []);
-      const match = candidates.length === 1 ? candidates[0] : null;
-
-      if (!match && candidates.length > 1) {
-        const names = candidates.slice(0, 6).map((c: any) => c.name).join(", ");
-        const ask = `Which one do you mean — ${names}?`;
-        await supabase.from("chat_messages").insert({ session_id: session.id, role: "bot", content: ask });
-        return json({ session_id: session.id, reply: ask, escalated: false, needs: "location" });
-      }
-      if (match) {
-        await supabase.from("chat_sessions").update({ location_id: match.id }).eq("id", session.id);
-        session.location_id = match.id;
-        location = match;
-
-        // They answered "which site?" and nothing more. There's no question to
-        // answer yet, so ask for one — escalating here would just make a ticket
-        // that says "Coffee Boy Retail".
-        const asked = (history || []).some((m) =>
-          m.role === "visitor" &&
-          m.content.trim().length > 25 &&
-          m.content.toLowerCase().replace(String(match.name).toLowerCase(), "").trim().length > 15
-        );
-        if (!asked) {
-          const ask = `Thanks — what's the problem at ${match.name}?`;
-          await supabase.from("chat_messages").insert({ session_id: session.id, role: "bot", content: ask });
-          await supabase.from("chat_sessions").update({ last_at: new Date().toISOString() }).eq("id", session.id);
-          return json({ session_id: session.id, reply: ask, escalated: false });
-        }
-      } else {
-        // Ask up to twice, then stop nagging and let the model try unqualified.
-        const asks = (history || []).filter((m) => m.role === "bot" && /which site|which one do you mean/i.test(m.content)).length;
-        if (asks >= 2) { /* fall through to the model */ }
-        else {
-        const ask = "Happy to help — which site am I helping with today?";
-        await supabase.from("chat_messages").insert({ session_id: session.id, role: "bot", content: ask });
-        return json({ session_id: session.id, reply: ask, escalated: false, needs: "location" });
-        }
-      }
-    }
-
-    // ── Answer ──────────────────────────────────────────────────────────────
-    const { data: cfg } = await supabase.from("ai_settings").select("*").eq("id", 1).maybeSingle();
-    if (!cfg?.enabled || !cfg?.api_key) {
-      return await escalate(pb.unknown_reply, "AI not configured");
-    }
+    const { data: allLocs } = await supabase.from("locations").select("id, name").order("name").limit(1000);
 
     const names = (pb.persona_names || []).filter(Boolean);
     const persona = names.length ? names[Math.floor(Math.random() * names.length)] : null;
 
-    let venueContext = "";
+    let venueBlock: string;
     if (location) {
       const { data: mods } = await supabase.from("location_modules")
         .select("status, module:modules(name)").eq("location_id", location.id);
       const live = (mods || []).filter((m: any) => m.status === "live").map((m: any) => m.module?.name).filter(Boolean);
-      venueContext = `The customer is at ${location.name}${location.city ? `, ${location.city}` : ""}.` +
-        (live.length ? ` Modules live at this site: ${live.join(", ")}.` : "");
+      venueBlock = `The customer is at ${location.name}${location.city ? `, ${location.city}` : ""}.` +
+        (live.length ? ` Live modules there: ${live.join(", ")}.` : "");
+    } else if (pb.ask_location) {
+      venueBlock =
+        `You do NOT know which venue the customer is at. Ask before troubleshooting.\n` +
+        `Only match what they actually say to this list. Never infer a venue from ordinary words in their problem ` +
+        `("something is broken" is NOT the venue "Broke 'n Bone"). If it isn't clearly one of these, ask again.\n` +
+        (allLocs || []).map((l: any) => `- ${l.name}`).join("\n");
+    } else {
+      venueBlock = "The venue is not needed for this chat.";
     }
 
+    const contactBlock = haveContact()
+      ? "You already have their contact details."
+      : "You do NOT have their contact details. Only ask for them when a person needs to take over.";
+
     const system =
-      `You are ${persona || "a member"} of the ServOS customer support team. ServOS is a restaurant ` +
-      `point-of-sale company. You are talking to a customer over live chat.\n\n` +
-      `TONE: ${pb.tone}. Short sentences. Sound like a real person typing, not a manual. ` +
-      `Never use bullet-point essays. Never say you are an AI model — but if the customer directly ` +
-      `asks whether they are talking to a bot or a human, tell them the truth plainly and offer to ` +
-      `get a colleague.\n\n` +
-      `RULES:\n` +
-      `- Only state things you are confident are true about ServOS. Never invent prices, dates, ` +
-      `refunds, contract terms or promises about fixes.\n` +
-      `- If you are not sure, do NOT guess. Reply with exactly: NEEDS_HUMAN\n` +
-      `- If the customer needs something actioned that you cannot do, reply: NEEDS_HUMAN\n` +
+      `You are ${persona || "a member"} of the ServOS support team. ServOS is a restaurant point-of-sale company. ` +
+      `You are on live chat with a customer.\n\n` +
+      `TONE: ${pb.tone}. Short sentences, warm, natural. Never bullet-point essays. ` +
+      `Never claim to be human — if asked outright whether you're a bot, say so plainly and offer a colleague.\n\n` +
+      `WHAT YOU KNOW\n${venueBlock}\n${contactBlock}\n\n` +
+      `HOW TO WORK\n` +
+      `- Your FIRST job is to understand the problem, not to hand it over. Ask short, specific questions ` +
+      `until you know which venue they're at and what is actually happening. One question at a time.\n` +
+      `- "Something is broken" is not enough to act on — ask what's broken and where.\n` +
+      `- Do NOT signal NEEDS_HUMAN while you still have a sensible question to ask, and never on the ` +
+      `first message. Only once you understand the problem and genuinely cannot help.\n` +
+      `- Never ask for their email or phone yourself; that is handled for you.\n\n` +
+      `RULES\n` +
+      `- If you get the venue wrong and they correct you, apologise in one line and ask again. Never insist.\n` +
+      `- Never invent prices, dates, refunds, contract terms, or promises about fixes.\n` +
+      `- Never guess an answer. When you're genuinely stuck, signal NEEDS_HUMAN.\n` +
       `- Keep replies under 90 words.\n\n` +
-      (venueContext ? `CONTEXT: ${venueContext}\n` : "");
+      `STATE LINE — REQUIRED. End EVERY reply with exactly one final line in this format. ` +
+      `It is stripped out and the customer never sees it. Use "-" for anything you don't know yet:\n` +
+      `STATE: venue=<exact name from the list, or ->; name=<their name or ->; contact=<their email or phone, or ->; needs_human=<yes|no>\n\n` +
+      `Example reply:\n` +
+      `Sorry about that — is it just that till, or all of them?\n` +
+      `STATE: venue=Alfred Works - Baity; name=-; contact=-; needs_human=no`;
 
     const messages = (history || []).slice(-HISTORY_TURNS).map((m) => ({
       role: m.role === "visitor" ? "user" : "assistant",
@@ -306,14 +331,10 @@ serve(async (req) => {
 
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": cfg.api_key,
-        "anthropic-version": "2023-06-01",
-      },
+      headers: { "Content-Type": "application/json", "x-api-key": cfg.api_key, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model: cfg.chat_model || "claude-sonnet-5",
-        max_tokens: 400,
+        max_tokens: 500,
         system,
         messages: messages.length ? messages : [{ role: "user", content: text }],
       }),
@@ -321,20 +342,54 @@ serve(async (req) => {
 
     if (!aiRes.ok) {
       console.error("chat: anthropic error", aiRes.status, await aiRes.text());
-      return await escalate(pb.unknown_reply, "AI request failed");
+      return await wantEscalation(pb.unknown_reply, "AI request failed");
     }
+
     const ai = await aiRes.json();
-    const reply = (ai?.content?.[0]?.text || "").trim();
+    // The reply is the TEXT block. Responses can start with a thinking block,
+    // so content[0] is not necessarily the answer (this cost an afternoon).
+    const replyText = (ai.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("").trim();
+    const sig = readSignals(replyText);
 
-    // The model's own escape hatch — treated as a hard escalation, not a message.
-    if (!reply || reply.includes("NEEDS_HUMAN")) {
-      return await escalate(pb.unknown_reply, "assistant was not confident");
+    // ── Apply what the model established ────────────────────────────────────
+    const patch: Record<string, unknown> = {};
+    if (sig.venue) {
+      const v = sig.venue.toLowerCase();
+      const found = (allLocs || []).find((l: any) => String(l.name).toLowerCase() === v)
+        || (allLocs || []).find((l: any) => String(l.name).toLowerCase().includes(v));
+      if (found) { patch.location_id = found.id; session.location_id = found.id; }
+    }
+    if (sig.name) { patch.visitor_name = sig.name; session.visitor_name = sig.name; }
+    if (sig.contact) {
+      if (looksLikeEmail(sig.contact)) { patch.visitor_email = sig.contact; session.visitor_email = sig.contact; }
+      else if (looksLikePhone(sig.contact)) { patch.visitor_phone = sig.contact; session.visitor_phone = sig.contact; }
+    }
+    if (Object.keys(patch).length) await supabase.from("chat_sessions").update(patch).eq("id", session.id);
+
+    // Were we waiting on contact details before raising a ticket?
+    if (session.pending_reason) {
+      return haveContact()
+        ? await escalate("Thanks — I've passed this to the team and someone will come back to you.", session.pending_reason)
+        : await escalate(pb.unknown_reply, `${session.pending_reason} (no contact details given)`);
     }
 
-    await supabase.from("chat_messages").insert({ session_id: session.id, role: "bot", content: reply });
-    if (session.ticket_id) await mirror(session.ticket_id, "bot", reply);
-    await supabase.from("chat_sessions").update({ last_at: new Date().toISOString() }).eq("id", session.id);
-    return json({ session_id: session.id, reply, escalated: false });
+    // Guard against handing over before the conversation has even started: while
+    // the venue is still unknown (or this is their opening message) there is
+    // always a better question to ask than "what's your email?".
+    const visitorTurns = (history || []).filter((m) => m.role === "visitor").length;
+    const tooEarly = visitorTurns <= 1 || (pb.ask_location && !session.location_id);
+
+    if ((sig.needsHuman || !sig.text) && tooEarly) {
+      return await say(sig.text || (pb.ask_location && !session.location_id
+        ? "Happy to help — which site are you at, and what's happening?"
+        : "Tell me a bit more about what's happening and I'll see what I can do."));
+    }
+
+    if (sig.needsHuman || !sig.text) {
+      return await wantEscalation(sig.text || pb.unknown_reply, "assistant was not confident");
+    }
+
+    return await say(sig.text);
   } catch (e) {
     console.error("chat error:", (e as Error).message);
     return json({ error: "Something went wrong." }, 500);
