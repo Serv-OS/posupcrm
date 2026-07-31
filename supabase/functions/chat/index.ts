@@ -322,6 +322,11 @@ serve(async (req) => {
       venueBlock = "The venue is not needed for this chat.";
     }
 
+    // A till in the venue is a trusted place to answer; a public website is not.
+    // Internal knowledge (admin codes, network work) is only ever served to a
+    // trusted embed.
+    const trustedEmbed = site.trust === "internal";
+
     // What we already know about this kind of problem. Retrieval is over our own
     // resolved tickets and written how-tos — the assistant may only answer from
     // these, so it can't invent a fix.
@@ -333,6 +338,7 @@ serve(async (req) => {
         q: problem, loc: session.location_id,
         mods: liveModules.length ? liveModules : null,
         lim: 5,
+        trusted: trustedEmbed,
       });
       knowledge = kb || [];
     }
@@ -369,11 +375,15 @@ serve(async (req) => {
       `Assume no technical knowledge.\n` +
       `- Give ONE simple step at a time, in plain words. Never a numbered list of five things.\n` +
       `- Start with the simplest fix that usually works, even if it seems too obvious.\n` +
-      `- NEVER walk them through DNS, IP addresses, subnets, routers, firewalls, packet-loss tests, ` +
-      `or anything requiring an admin password or engineer. If the fix needs any of that, stop and ` +
-      `hand over to a person.\n` +
-      `- NEVER give out a PIN, password or access code, even if you have seen one. Say support will ` +
-      `provide it.\n` +
+      (trustedEmbed
+        ? `- Deeper technical steps are allowed here, but still one step at a time and in plain words.\n`
+        : `- NEVER walk them through DNS, IP addresses, subnets, routers, firewalls or packet-loss ` +
+          `tests. If the fix needs any of that, stop and hand over to a person.\n`) +
+      (trustedEmbed
+        ? `- You are on a till or staff screen inside the venue. If a known fix needs an admin code, ` +
+          `you may give it, and you may talk them through network settings.\n`
+        : `- You are on a public website talking to someone you cannot identify. NEVER give out a PIN, ` +
+          `password or access code, even if you have seen one — say support will provide it directly.\n`) +
       `- If two or three simple things haven't fixed it, stop troubleshooting and hand over. Do not ` +
       `keep digging.\n\n` +
       `HOW TO WORK\n` +

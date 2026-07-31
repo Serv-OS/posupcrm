@@ -252,6 +252,12 @@ export default function ChatSitesCard({ profile }) {
                       {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                     </select>
                     <div className="text-[10px] text-dim mt-0.5">Set this for a POS till so it never asks.</div>
+                    <button onClick={() => saveSite(s.id, { trust: s.trust === 'internal' ? 'public' : 'internal' })}
+                      disabled={!canWrite}
+                      title="Trusted embeds can be given admin codes and deeper technical steps"
+                      className={`mt-1.5 px-2 py-0.5 text-[9px] font-bold uppercase rounded ${s.trust === 'internal' ? 'bg-amber-500 text-white' : 'bg-card text-dim border border-bdr'}`}>
+                      {s.trust === 'internal' ? 'Trusted — staff screen' : 'Public website'}
+                    </button>
                   </div>
                   <div><label className={label}>Allowed domains</label>
                     <textarea rows={2} className={input + ' !py-1 resize-none font-mono text-[11px]'} disabled={!canWrite}
