@@ -278,6 +278,7 @@ serve(async (req) => {
     const products = (modRows || []).map((m: any) => m.name).filter(Boolean);
 
     let location: any = null;
+    let liveModules: string[] = [];   // the software this site actually runs
     if (session.location_id) {
       const { data } = await supabase.from("locations").select("id, name, city").eq("id", session.location_id).maybeSingle();
       location = data;
@@ -292,6 +293,7 @@ serve(async (req) => {
       const { data: mods } = await supabase.from("location_modules")
         .select("status, module:modules(name)").eq("location_id", location.id);
       const live = (mods || []).filter((m: any) => m.status === "live").map((m: any) => m.module?.name).filter(Boolean);
+      liveModules = live;
       // What hardware is actually deployed there, so it can talk about the real kit.
       const { data: kit } = await supabase.from("inv_serials")
         .select("product_name, category, serial").eq("location_id", location.id).limit(40);
@@ -317,7 +319,11 @@ serve(async (req) => {
       .slice(-4).map((m) => m.content).join(" ").slice(0, 400);
     let knowledge: any[] = [];
     if (problem.trim().length > 8) {
-      const { data: kb } = await supabase.rpc("kb_search", { q: problem, loc: session.location_id, lim: 5 });
+      const { data: kb } = await supabase.rpc("kb_search", {
+        q: problem, loc: session.location_id,
+        mods: liveModules.length ? liveModules : null,
+        lim: 5,
+      });
       knowledge = kb || [];
     }
     const knowledgeBlock = knowledge.length
@@ -360,6 +366,8 @@ serve(async (req) => {
       `- Never invent prices, dates, refunds, contract terms, or promises about fixes.\n` +
       `- Only give a fix that comes from KNOWN FIXES above. If none of them fit, do not improvise ` +
       `a fix from general knowledge — say you'll get a person onto it.\n` +
+      `- The known fixes are already filtered to the software this site runs. Answer in terms of ` +
+      `their setup, and never mention a product they don't have.\n` +
       `- Keep replies under 90 words.\n\n` +
       `STATE LINE — REQUIRED. End EVERY reply with exactly one final line in this format. ` +
       `It is stripped out and the customer never sees it. Use "-" for anything you don't know yet:\n` +

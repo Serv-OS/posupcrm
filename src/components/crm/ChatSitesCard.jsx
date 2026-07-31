@@ -18,6 +18,9 @@ export default function ChatSitesCard({ profile }) {
   const [kbCount, setKbCount] = useState(null);
   const [learning, setLearning] = useState(false);
   const [learned, setLearned] = useState('');
+  const [modules, setModules] = useState([]);
+  const [teach, setTeach] = useState({ url: '', text: '', module: '' });
+  const [teaching, setTeaching] = useState(false);
   const [copied, setCopied] = useState('');
   const [err, setErr] = useState('');
 
@@ -35,6 +38,8 @@ export default function ChatSitesCard({ profile }) {
     if (p.error) setErr(p.error.message);
     const { count } = await supabase.from('kb_docs').select('id', { count: 'exact', head: true }).eq('active', true);
     setKbCount(count ?? 0);
+    const { data: mods } = await supabase.from('modules').select('name').order('name');
+    setModules((mods || []).map(m => m.name));
     setPb(p.data || null);
     setSites(s.data || []);
     setLocations(l.data || []);
@@ -96,6 +101,32 @@ export default function ChatSitesCard({ profile }) {
       load();
     } catch (e) { setErr(e.message); }
     setLearning(false);
+  };
+
+  // Read a supplier doc (or pasted text) and turn it into answers.
+  const teachFrom = async () => {
+    if (!teach.url.trim() && !teach.text.trim()) { setErr('Paste a documentation link or the text itself.'); return; }
+    setTeaching(true); setLearned(''); setErr('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kb-learn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({
+          url: teach.url.trim() || undefined,
+          text: teach.text.trim() || undefined,
+          module: teach.module || undefined,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Could not read that.');
+      setLearned(d.learned
+        ? `Learned ${d.learned} answer${d.learned === 1 ? '' : 's'}${teach.module ? ` for ${teach.module}` : ''}.`
+        : (d.note || 'Nothing useful found there.'));
+      setTeach({ url: '', text: '', module: teach.module });
+      load();
+    } catch (e) { setErr(e.message); }
+    setTeaching(false);
   };
 
   const copy = (text, tag) => {
@@ -247,6 +278,32 @@ export default function ChatSitesCard({ profile }) {
             ticket with a real reply becomes a reusable answer.
           </div>
           {learned && <div className="text-xs text-emerald-600 mt-1">{learned}</div>}
+
+          {canWrite && (
+            <div className="glass-inner rounded-xl p-3 mt-3 space-y-2">
+              <div className="text-xs font-medium text-paper">Teach it from supplier documentation</div>
+              <div className="grid grid-cols-3 gap-2">
+                <input className={input + ' !py-1.5 text-xs col-span-2'} placeholder="https://… supplier help page"
+                  value={teach.url} onChange={e => setTeach({ ...teach, url: e.target.value })} />
+                <select className={input + ' !py-1.5 text-xs'} value={teach.module}
+                  onChange={e => setTeach({ ...teach, module: e.target.value })}>
+                  <option value="">Which product?</option>
+                  {modules.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <textarea rows={3} className={input + ' resize-none text-xs'} placeholder="…or paste the documentation / your own notes here"
+                value={teach.text} onChange={e => setTeach({ ...teach, text: e.target.value })} />
+              <div className="flex items-center gap-2">
+                <button onClick={teachFrom} disabled={teaching}
+                  className="btn-glass px-4 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-50">
+                  {teaching ? 'Reading…' : 'Learn from this'}
+                </button>
+                <span className="text-[10px] text-dim">
+                  Tag it with the product so sites only get fixes for the software they actually run.
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Playbook ───────────────────────────────────────────────────── */}
