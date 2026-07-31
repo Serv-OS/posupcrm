@@ -1,7 +1,10 @@
 # AI Support Chatbot — plan
 
-**Goal:** an embeddable chat widget that answers customer support questions the way we do,
-learns from our own past enquiries, and — when it doesn't know — says so and raises a real ticket.
+**Goal:** one support brain that answers questions the way we do — on the website, over
+email and over SMS — learns from our own past enquiries, and, when it doesn't know, says so
+and raises a real ticket for a person.
+
+The widget is phase 1; **email and SMS run through the same engine** (section 12).
 
 **Build order:** posupcrm first. Then the other CRMs (Peter to guide per-instance).
 
@@ -53,6 +56,8 @@ chat_messages     id, session_id, role ('visitor'|'bot'|'agent'), content,
 chat_playbook     id, ask_first[], never_answer[], always_escalate[], persona_names[],
                   greeting, tone, updated_at
 chat_sites        id, site_key, label, allowed_origins[], location_id (nullable), active
+ai_channels       channel ('chat'|'email'|'sms'), mode ('off'|'suggest'|'auto'),
+                  confidence_min, daily_send_cap, out_of_hours_ok, updated_at
 ```
 
 Notes:
@@ -171,14 +176,89 @@ silently — it escalates) when a cap is hit.
 | **1** | Widget + playbook + location qualification + escalate-to-ticket. **No knowledge base yet** | Already useful: qualified tickets, out of hours cover |
 | **2** | CSV import + pgvector retrieval + confidence gate | Actually answers real questions |
 | **3** | Review screen: read conversations, thumbs-down bad answers, promote good replies to `kb_docs` | Gets better weekly, with a human in the loop |
-| **4** | Venue-aware actions (order status, open tickets, "is my till online?") | Deflects the highest-volume calls |
-| **5** | Roll out to the other CRMs (per-instance playbook + knowledge, shared code) | Peter to guide |
+| **4** | **Email + SMS in Suggest mode** — drafts land on the ticket, humans send | Speeds up every reply, and measures accuracy safely |
+| **5** | **Auto-send** for the categories the data says are safe | Real deflection, out-of-hours cover |
+| **6** | Venue-aware actions (order status, open tickets, "is my till online?") | Deflects the highest-volume calls |
+| **7** | Roll out to the other CRMs (per-instance playbook + knowledge, shared code) | Peter to guide |
 
 Phase 1 is genuinely shippable on its own — that's deliberate.
 
 ---
 
-## 12. Open questions for Peter
+## 12. Same brain on email + SMS
+
+The widget is just one mouth. The knowledge, playbook, confidence gate and escalation are
+channel-agnostic, so inbound **email** and **SMS** run through the same engine.
+
+**Where it hooks in:** `gmail-check` / `ms-check` / `twilio-inbound-sms` already create the
+ticket and log the inbound message. The AI step runs immediately after that — no new polling.
+
+### Why these channels are *easier* in one way
+
+We usually already know who's writing: the email address or mobile matches a contact, which
+gives us the location. **No qualification round-trip needed** — it can answer properly on the
+first reply, which is the opposite of an anonymous website visitor.
+
+### And *harder* in another — this drives the design
+
+A wrong chat message gets corrected in the next breath. A wrong **email** is sent, permanent,
+and written under a real person's name. So autonomous sending needs a higher bar than chat.
+
+### Three modes, set per channel
+
+| Mode | Behaviour |
+|---|---|
+| **Off** | Nothing changes |
+| **Suggest** | Drafts the reply into the ticket; a human presses send |
+| **Auto-send** | Sends with no human, but only if **every** gate below passes |
+
+`Suggest` is not a stepping stone to skip — it is how we measure whether auto-send is safe
+(see rollout).
+
+### Gates for auto-send — all must pass
+
+1. Retrieval confidence above the **auto-send threshold** (deliberately higher than chat's)
+2. Intent not in *never answer* (billing, contracts, refunds, legal, outage)
+3. Sender resolves to a **known contact at a known location**
+4. No anger/complaint signals detected
+5. Under the per-day auto-send cap
+6. Channel mode is `auto-send` for that channel
+
+Fail any one → it does not send. It drafts, flags the ticket for a human, and (for the
+customer) either stays silent or sends the honest holding line, depending on setting.
+
+### Always true, regardless of mode
+
+- Every AI reply is **logged and labelled AI-sent** in the thread — visible to us, not to the
+  customer.
+- The **ticket stays open**. The bot never resolves or closes a ticket in v1; a human or the
+  customer's confirmation does that.
+- **One reply per inbound message**, hard rate-limited — no possibility of a loop with an
+  auto-responder on the other end.
+- A **global kill switch** in Settings stops all autonomous sending instantly.
+
+### SMS specifics
+
+- 160-character discipline; long answers become "I'll email you the detail" + escalate.
+- Costs real money per send, so the per-day cap matters more here.
+- Existing STOP/opt-out handling is untouched.
+- US instances need A2P registration to be live first (see PSC).
+
+### Rollout — measured, not faith-based
+
+1. **Suggest-only** for ~2 weeks on email. Log, for every draft, whether the agent sent it
+   unchanged.
+2. Read the numbers per category. Anything with a high "sent unchanged" rate is a safe
+   candidate.
+3. Turn on **auto-send for those 2–3 categories only** (typically the how-do-I questions).
+4. Widen category by category. Never a big-bang switch.
+
+This gives a real answer to "can it be trusted yet?" instead of a guess, and out-of-hours is
+where it pays for itself first.
+
+---
+
+## 13. Open questions for Peter
 
 1. **The CSV** — drop it anywhere in the project folder and I'll shape the importer to what's
    actually in it rather than guessing.
