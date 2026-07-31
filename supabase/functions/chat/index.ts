@@ -34,7 +34,7 @@ const HISTORY_TURNS = 14;
 type Playbook = {
   enabled: boolean; greeting: string; tone: string; ask_location: boolean;
   never_answer: string[]; always_escalate: string[]; persona_names: string[];
-  unknown_reply: string;
+  unknown_reply: string; business_context: string | null;
 };
 
 /** Whole-word keyword match, so "broke" can never fire on "broken". */
@@ -268,6 +268,15 @@ serve(async (req) => {
     const { data: cfg } = await supabase.from("ai_settings").select("*").eq("id", 1).maybeSingle();
     if (!cfg?.enabled || !cfg?.api_key) return await wantEscalation(pb.unknown_reply, "AI not configured");
 
+    // Identity comes from settings. Never hard-code a company or product name —
+    // each CRM supports different software, and getting this wrong is worse than
+    // saying nothing.
+    const { data: biz } = await supabase.from("support_settings")
+      .select("business_name").eq("id", 1).maybeSingle();
+    const company = (biz?.business_name || "").trim();
+    const { data: modRows } = await supabase.from("modules").select("name").order("name");
+    const products = (modRows || []).map((m: any) => m.name).filter(Boolean);
+
     let location: any = null;
     if (session.location_id) {
       const { data } = await supabase.from("locations").select("id, name, city").eq("id", session.location_id).maybeSingle();
@@ -323,9 +332,18 @@ serve(async (req) => {
       ? "You already have their contact details."
       : "You do NOT have their contact details. Only ask for them when a person needs to take over.";
 
+    const identity =
+      (pb.business_context || "").trim() ||
+      [
+        company ? `You work for ${company}.` : "",
+        products.length ? `${company || "The company"} supports these products: ${products.join(", ")}.` : "",
+        "Never name a product or system that isn't listed here, and never claim to be the maker of software you only support.",
+      ].filter(Boolean).join(" ");
+
     const system =
-      `You are ${persona || "a member"} of the ServOS support team. ServOS is a restaurant point-of-sale company. ` +
+      `You are ${persona || "a member"} of the ${company || "support"} support team. ` +
       `You are on live chat with a customer.\n\n` +
+      `WHO YOU ARE\n${identity}\n\n` +
       `TONE: ${pb.tone}. Short sentences, warm, natural. Never bullet-point essays. ` +
       `Never claim to be human — if asked outright whether you're a bot, say so plainly and offer a colleague.\n\n` +
       `WHAT YOU KNOW\n${venueBlock}\n${contactBlock}\n\n` +

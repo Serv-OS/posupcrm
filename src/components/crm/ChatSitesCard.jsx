@@ -47,7 +47,8 @@ export default function ChatSitesCard({ profile }) {
       enabled: next.enabled, greeting: next.greeting, tone: next.tone,
       ask_location: next.ask_location, never_answer: next.never_answer,
       always_escalate: next.always_escalate, persona_names: next.persona_names,
-      unknown_reply: next.unknown_reply, updated_at: new Date().toISOString(),
+      unknown_reply: next.unknown_reply, business_context: next.business_context,
+      updated_at: new Date().toISOString(),
     }).eq('id', 1);
     if (error) setErr(error.message);
   };
@@ -252,6 +253,14 @@ export default function ChatSitesCard({ profile }) {
         <div className="pt-1 border-t border-bdr">
           <div className="text-sm font-medium text-paper mt-4 mb-2">What it says</div>
           <div className="space-y-2">
+            <div><label className={label}>Who you are</label>
+              <textarea rows={3} className={input + ' resize-none'} value={pb.business_context || ''} disabled={!canWrite}
+                placeholder="Leave blank to use your business name and module list automatically."
+                onChange={e => setPb({ ...pb, business_context: e.target.value })}
+                onBlur={e => savePb({ business_context: e.target.value })} />
+              <div className="text-[10px] text-dim mt-1">
+                Stops it inventing a company or product. Blank = built from your business name and the modules you support.
+              </div></div>
             <div><label className={label}>Greeting</label>
               <input className={input} value={pb.greeting || ''} disabled={!canWrite}
                 onChange={e => setPb({ ...pb, greeting: e.target.value })}

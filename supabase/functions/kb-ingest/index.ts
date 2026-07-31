@@ -60,6 +60,11 @@ serve(async (req) => {
     const { data: cfg } = await supabase.from("ai_settings").select("*").eq("id", 1).maybeSingle();
     if (!cfg?.api_key) return json({ error: "Add your Anthropic API key in Settings → AI Assistant first." }, 400);
 
+    const { data: biz } = await supabase.from("support_settings").select("business_name").eq("id", 1).maybeSingle();
+    const company = (biz?.business_name || "").trim();
+    const { data: modRows } = await supabase.from("modules").select("name").order("name");
+    const products = (modRows || []).map((m: any) => m.name).filter(Boolean);
+
     // Which tickets have we already learned from?
     const { data: done } = await supabase.from("kb_docs").select("source_ref").eq("source", "ticket");
     const seen = new Set((done || []).map((d: any) => d.source_ref).filter(Boolean));
@@ -90,8 +95,8 @@ serve(async (req) => {
       if (transcript.length < 120) { result.skipped_thin++; continue; }
 
       const system =
-        `You turn resolved support conversations into reusable knowledge for a restaurant ` +
-        `point-of-sale company (ServOS).\n\n` +
+        `You turn resolved support conversations into reusable knowledge for ${company || "a support team"}.` +
+        (products.length ? ` They support: ${products.join(", ")}.` : "") + `\n\n` +
         `Read the conversation and produce ONE reusable entry, as strict JSON:\n` +
         `{"useful":true|false,"title":"...","question":"...","answer":"...","category":"...","module":"..."}\n\n` +
         `- useful=false if nothing generalisable was learned (chit-chat, a one-off admin request, ` +
