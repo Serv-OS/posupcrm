@@ -42,6 +42,7 @@
   var root = host.attachShadow ? host.attachShadow({ mode: 'open' }) : host;
 
   var inline = cfg.mode === 'inline';
+  if (inline) host.style.cssText = 'display:block;height:100%;min-height:0;';
   var mount = null;
   if (inline) {
     mount = cfg.target ? document.querySelector(cfg.target) : null;
@@ -70,19 +71,27 @@
     '  z-index: 2147483000; }',
     '.panel.open { display: flex; }',
     // inline mode fills its container instead of floating
+    '.inline { height: 100%; min-height: 0; }',
     '.inline .panel { position: static; right:auto; bottom:auto; width:100%; height:100%;',
     '  max-width:none; max-height:none; border-radius:0; box-shadow:none; display:flex; }',
     '.inline .bubble { display: none; }',
     '@media (max-width: 480px) {',
-    '  .panel { right: 8px; left: 8px; bottom: 84px; width: auto; height: calc(100vh - 110px); }',
+    '  .panel { top: 0; right: 0; bottom: 0; left: 0; width: auto; max-width: none;',
+    '    height: 100vh; height: 100dvh; max-height: 100dvh; border-radius: 0; }',
+    '  .bubble { display: none; }',
     '}',
-    '.head { background: var(--acc); color: #fff; padding: 14px 16px; display: flex; align-items: center; gap: 10px; }',
+    '.head { background: var(--acc); color: #fff; padding: 14px 16px; display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }',
     '.head .t { font-weight: 700; font-size: 15px; }',
     '.head .s { font-size: 12px; opacity: .85; }',
     '.x { margin-left: auto; background: rgba(255,255,255,.18); border: 0; color: #fff; width: 28px; height: 28px;',
     '  border-radius: 8px; cursor: pointer; font-size: 16px; line-height: 1; }',
     '.inline .x { display: none; }',
-    '.msgs { flex: 1; overflow-y: auto; padding: 16px; background: #f6f8f7; }',
+    '@media (max-width: 480px) { .inline .x { display: block; } .wrap.inline .x { display: none; } }',
+    // A flex child defaults to min-height:auto, so it grows to fit its content
+    // and gets clipped by the panel instead of scrolling. min-height:0 is what
+    // actually makes the message list scrollable.
+    '.msgs { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;',
+    '  overscroll-behavior: contain; padding: 16px; background: #f6f8f7; }',
     '.m { max-width: 84%; padding: 10px 13px; border-radius: 14px; margin-bottom: 10px; white-space: pre-wrap;',
     '  word-wrap: break-word; font-size: 14.5px; }',
     '.m.bot { background: #fff; border: 1px solid #e6ebe8; border-bottom-left-radius: 5px; }',
@@ -92,7 +101,8 @@
     '.typing i { width: 7px; height: 7px; border-radius: 50%; background: #b9c3bd; animation: b 1.2s infinite; }',
     '.typing i:nth-child(2){ animation-delay:.2s } .typing i:nth-child(3){ animation-delay:.4s }',
     '@keyframes b { 0%,60%,100%{opacity:.3; transform:translateY(0)} 30%{opacity:1; transform:translateY(-4px)} }',
-    '.foot { border-top: 1px solid #e6ebe8; padding: 10px; display: flex; gap: 8px; background: #fff; }',
+    '.foot { border-top: 1px solid #e6ebe8; padding: 10px; display: flex; gap: 8px; background: #fff;',
+    '  flex: 0 0 auto; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }',
     'textarea { flex: 1; resize: none; border: 1px solid #dfe6e2; border-radius: 12px; padding: 10px 12px;',
     '  font: inherit; font-size: 14.5px; max-height: 120px; outline: none; }',
     'textarea:focus { border-color: var(--acc); }',
@@ -191,7 +201,14 @@
   var started = false;
   function openPanel() {
     panel.classList.add('open');
-    if (!started) { started = true; post(null); }   // greeting on first open
+    if (!started) {
+      started = true;
+      // Only ask the server to open a conversation when there isn't one. With a
+      // session already in hand (reopened panel, page refresh) a message-less
+      // post is rejected as empty, which surfaced as a red error to the user.
+      if (sessionId) add('Hi again — carry on where you left off, or tell me what you need.', 'bot');
+      else post(null);
+    }
     setTimeout(function () { ta.focus(); }, 60);
   }
   bubble.addEventListener('click', function () {
