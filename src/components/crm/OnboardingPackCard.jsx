@@ -112,6 +112,18 @@ export default function OnboardingPackCard({ onboarding, company, location, loca
           </>
         ) : (
           <>
+            {done && answers.signoff?.agreed === true && (
+              <div className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200">
+                <div className="text-[11px] font-bold text-emerald-800">
+                  Signed off by {answers.signoff.full_name || 'unnamed'}
+                  {answers.signoff.position ? `, ${answers.signoff.position}` : ''}
+                </div>
+                <div className="text-[10px] text-emerald-700 mt-0.5">
+                  Accepted our terms on {fmt(req.submitted_at)}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1 text-xs">
               <Row k="Venue" v={locations.find(l => l.id === req.location_id)?.name || (req.location_id ? '—' : 'NOT SET')} />
               <Row k="Sent to" v={req.sent_to} />
@@ -154,6 +166,7 @@ export default function OnboardingPackCard({ onboarding, company, location, loca
                               <div className="space-y-1.5">
                                 {rows.map(f => {
                                   const v = a[f.key];
+                                  if (f.type === 'terms') return null;
                                   if (f.type === 'confirm') {
                                     return (
                                       <div key={f.key} className="text-xs flex gap-1.5">

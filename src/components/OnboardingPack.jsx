@@ -173,6 +173,19 @@ export default function OnboardingPack({ token }) {
                   const v = a[f.key];
                   const busy = uploading[`${section.key}.${f.key}`];
 
+                  // The declaration itself: read-only, and deliberately set
+                  // apart so it does not read as another question to fill in.
+                  if (f.type === 'terms') {
+                    return (
+                      <div key={f.key} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 mb-2">{f.label}</div>
+                        <ol className="space-y-2 text-[13px] text-slate-700 leading-relaxed list-decimal pl-4 marker:text-slate-400">
+                          {f.clauses.map((c, i) => <li key={i}>{c}</li>)}
+                        </ol>
+                      </div>
+                    );
+                  }
+
                   if (f.type === 'confirm') {
                     return (
                       <label key={f.key}

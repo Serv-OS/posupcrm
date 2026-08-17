@@ -10,7 +10,9 @@
  *   Things to do     jobs for the customer to complete before install day
  *
  * Field kinds:
- *   text | textarea | choice | file | confirm
+ *   text | textarea | choice | file | confirm | terms
+ * `terms` renders read-only clauses (the sign-off declaration) and is never
+ * an answer in its own right — the tick that follows it is.
  * `confirm` is a single tick the customer must give: used for the install
  * checks, where "not answered" and "no" are the same problem for the engineer.
  * `showIf(answers_for_this_section)` hides a field until it is relevant, so
@@ -25,6 +27,7 @@ export const GROUPS = [
   { key: 'account', title: 'Account config', short: 'Account', blurb: 'What we build your till from.' },
   { key: 'install', title: 'Install information', short: 'Install', blurb: 'What has to be true on site before our engineer travels.' },
   { key: 'todo', title: 'Things to do', short: 'To do', blurb: 'A couple of jobs for you before install day.' },
+  { key: 'signoff', title: 'Sign off', short: 'Sign off', blurb: 'Who is confirming this, and what you are confirming.' },
 ];
 
 export const SECTIONS = [
@@ -162,6 +165,33 @@ export const SECTIONS = [
         label: 'Updated every iPad to the latest iOS' },
     ],
   },
+
+  // ── Sign off ──────────────────────────────────────────────────────────────
+  {
+    key: 'signoff', group: 'signoff', title: 'Sign off',
+    hint: 'The last step. Everything above gets built from this, and our engineer travels on the strength of it.',
+    fields: [
+      { key: 'full_name', label: 'Full name of the person signing off', type: 'text', required: true },
+      { key: 'position', label: 'Position in the business', type: 'text', required: true,
+        hint: 'e.g. Owner, Director, General Manager.' },
+      {
+        key: 'terms', type: 'terms', label: 'What you are confirming',
+        clauses: [
+          'The information in this pack is true, complete and accurate to the best of my knowledge.',
+          'I am authorised to give this information and to accept these terms on behalf of the business named above.',
+          'The site readiness confirmations are accurate, and I will tell you straight away if any of them stop being true before the install date.',
+          'I understand that if information is missing or wrong, or the site is not ready as confirmed, the installation may not be able to go ahead on the day.',
+          'I understand that an installation that has to be rearranged for those reasons may be rechargeable to us, including the engineer visit.',
+          'I have completed, or will complete before install day, the jobs listed under Things to do.',
+          'I understand that significant changes to the menu, users or printing setup after this pack is submitted may delay the build and may be chargeable.',
+          'I have the right to share the details given here, including staff names, PINs and network details, and I am happy for them to be used to set up and support the system.',
+        ],
+      },
+      { key: 'agreed', type: 'confirm', required: true,
+        label: 'I confirm the above on behalf of the business',
+        hint: 'Your name, position and the date and time are recorded with this pack.' },
+    ],
+  },
 ];
 
 /** Sections belonging to a group, in order. */
@@ -176,6 +206,7 @@ export function visibleFields(section, answers = {}) {
 }
 
 const isEmpty = (f, v) => {
+  if (f.type === 'terms') return true;            // display only, never an answer
   if (f.type === 'file') return !(Array.isArray(v) ? v.length : v);
   if (f.type === 'confirm') return v !== true;
   return !String(v ?? '').trim();
@@ -207,6 +238,7 @@ export function summarize(answers = {}) {
           const names = (Array.isArray(v) ? v : [v]).map((x) => x?.name).filter(Boolean);
           return names.length ? `${f.label}: ${names.join(', ')}` : null;
         }
+        if (f.type === 'terms') return null;
         if (f.type === 'confirm') return `[confirmed] ${f.label}`;
         // The WiFi password is not repeated into the activity feed; it lives on
         // the request record where it can be shown deliberately.
