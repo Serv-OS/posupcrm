@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { GROUPS, SECTIONS, sectionsIn, visibleFields, missingRequired, summarize, allFiles } from '../lib/onboardingForm';
 
 // The customer's onboarding pack. No login: the token in the URL is the way in.
 //
-// Written for someone filling this in on a phone between services, so: one
-// section at a time, progress they can see, answers kept as they go, and files
-// uploaded the moment they are picked (a 20MB menu PDF should not be waiting on
-// the Submit button). Nothing here talks to the database directly — every call
-// goes through the onboarding-form function.
+// Shape of the thing: three tabs, one per group, and everything in that group on
+// a single scrolling page. An earlier version put all fifteen sections across the
+// top as chips, which turned the first thing you see into a wall of navigation.
+// Three tabs is the whole map, and scrolling beats hunting.
+//
+// Written for someone filling this in on a phone between services: it saves as
+// they go, and files upload the moment they are picked so a 20MB menu is never
+// stuck behind the send button.
 
 const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/onboarding-form`;
 const call = async (payload) => {
@@ -22,7 +25,7 @@ const call = async (payload) => {
 export default function OnboardingPack({ token }) {
   const [state, setState] = useState({ loading: true, error: '', venue: '', submitted: false });
   const [answers, setAnswers] = useState({});
-  const [step, setStep] = useState(0);
+  const [tab, setTab] = useState(0);
   const [uploading, setUploading] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [showMissing, setShowMissing] = useState(false);
@@ -39,48 +42,54 @@ export default function OnboardingPack({ token }) {
     })();
   }, [token]);
 
-  const section = SECTIONS[step];
-  const a = answers[section?.key] || {};
-  const set = (fieldKey, value) =>
-    setAnswers((prev) => ({ ...prev, [section.key]: { ...(prev[section.key] || {}), [fieldKey]: value } }));
+  const set = (sectionKey, fieldKey, value) =>
+    setAnswers((prev) => ({ ...prev, [sectionKey]: { ...(prev[sectionKey] || {}), [fieldKey]: value } }));
 
-  const missing = missingRequired(answers);
-  const missingHere = section
-    ? missing.filter((m) => m.section === section.title).length
-    : 0;
+  const missing = useMemo(() => missingRequired(answers), [answers]);
+  const owedIn = (groupKey) => {
+    const titles = new Set(sectionsIn(groupKey).map((s) => s.title));
+    return missing.filter((m) => titles.has(m.section)).length;
+  };
+  const totalRequired = useMemo(() => missingRequired({}).length, []);
+  const doneCount = Math.max(0, totalRequired - missing.length);
+  const pct = totalRequired ? Math.round((doneCount / totalRequired) * 100) : 100;
 
-  // Upload as soon as a file is chosen: straight to storage via a signed URL.
-  const upload = async (field, fileList) => {
+  const upload = async (sectionKey, field, fileList) => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
-    setUploading((u) => ({ ...u, [field.key]: true }));
+    const busyKey = `${sectionKey}.${field.key}`;
+    setUploading((u) => ({ ...u, [busyKey]: true }));
     try {
       const stored = [];
       for (const file of files) {
-        const { path, signedUrl, name } = await call({
-          token, action: 'upload-url', fileName: file.name, size: file.size,
+        const { path, signedUrl, name } = await call({ token, action: 'upload-url', fileName: file.name, size: file.size });
+        const put = await fetch(signedUrl, {
+          method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
         });
-        const put = await fetch(signedUrl, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
         if (!put.ok) throw new Error(`Could not upload ${file.name}.`);
         stored.push({ name, path, size: file.size, mime: file.type || null });
       }
-      const existing = a[field.key];
+      const existing = (answers[sectionKey] || {})[field.key];
       const prev = Array.isArray(existing) ? existing : existing ? [existing] : [];
-      set(field.key, field.multiple ? [...prev, ...stored] : stored[0]);
-    } catch (e) {
-      alert(e.message);
-    }
-    setUploading((u) => ({ ...u, [field.key]: false }));
+      set(sectionKey, field.key, field.multiple ? [...prev, ...stored] : stored[0]);
+    } catch (e) { alert(e.message); }
+    setUploading((u) => ({ ...u, [busyKey]: false }));
   };
 
-  const removeFile = (field, path) => {
-    const v = a[field.key];
-    if (field.multiple) set(field.key, (Array.isArray(v) ? v : []).filter((f) => f.path !== path));
-    else set(field.key, null);
+  const removeFile = (sectionKey, field, path) => {
+    const v = (answers[sectionKey] || {})[field.key];
+    if (field.multiple) set(sectionKey, field.key, (Array.isArray(v) ? v : []).filter((f) => f.path !== path));
+    else set(sectionKey, field.key, null);
   };
 
   const submit = async () => {
-    if (missing.length) { setShowMissing(true); return; }
+    if (missing.length) {
+      setShowMissing(true);
+      const first = GROUPS.findIndex((g) => owedIn(g.key) > 0);
+      if (first >= 0) setTab(first);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     setSubmitting(true);
     try {
       await call({ token, action: 'submit', answers, files: allFiles(answers), summary: summarize(answers) });
@@ -90,173 +99,197 @@ export default function OnboardingPack({ token }) {
     setSubmitting(false);
   };
 
-  if (state.loading) return <Frame><div className="text-center text-slate-500 py-16">Loading…</div></Frame>;
-  if (state.error) return <Frame><div className="text-center py-16"><div className="text-3xl mb-3">🔒</div><div className="text-slate-700">{state.error}</div></div></Frame>;
+  if (state.loading) return <Frame><div className="py-24 text-center text-slate-400 text-sm">Loading…</div></Frame>;
+  if (state.error) return (
+    <Frame><div className="py-20 text-center">
+      <div className="text-4xl mb-3">🔒</div>
+      <div className="text-slate-700 max-w-sm mx-auto">{state.error}</div>
+    </div></Frame>
+  );
   if (state.submitted) return (
-    <Frame>
-      <div className="text-center py-14">
-        <div className="text-4xl mb-4">✅</div>
-        <h1 className="text-xl font-bold text-slate-900 mb-2">Thank you, that's everything we need</h1>
-        <p className="text-slate-600 text-sm max-w-md mx-auto">
-          Your onboarding pack is with our team{state.venue ? ` for ${state.venue}` : ''}. We'll be in touch if anything needs
-          clarifying, and you'll hear from us with next steps shortly.
-        </p>
-      </div>
-    </Frame>
+    <Frame><div className="py-20 text-center">
+      <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 text-3xl flex items-center justify-center mx-auto mb-5">✓</div>
+      <h1 className="text-2xl font-bold text-slate-900 mb-2">That's everything, thank you</h1>
+      <p className="text-slate-600 text-[15px] max-w-md mx-auto leading-relaxed">
+        Your pack is with our team{state.venue ? <> for <strong>{state.venue}</strong></> : null}. We'll be in touch if
+        anything needs clarifying, and you'll hear from us with next steps shortly.
+      </p>
+    </div></Frame>
   );
 
-  const input = "w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-[15px] text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900";
+  const group = GROUPS[tab];
+  const sections = sectionsIn(group.key);
 
   return (
     <Frame>
-      <div className="mb-5">
-        <h1 className="text-xl font-bold text-slate-900">Onboarding pack</h1>
-        <p className="text-sm text-slate-600 mt-0.5">
+      {/* Header: what this is, who it's for, how far through */}
+      <div className="pt-7 pb-5">
+        <h1 className="text-[26px] leading-tight font-bold text-slate-900">Onboarding pack</h1>
+        <p className="text-[15px] text-slate-600 mt-1">
           {state.venue ? <>Setting up <span className="font-semibold text-slate-800">{state.venue}</span>. </> : null}
-          Everything here goes straight into building your till. It saves as you go, so you can stop and come back.
+          It saves as you go, so you can stop and come back.
         </p>
-      </div>
-
-      {/* Progress: grouped, tappable, showing what each part still owes */}
-      <div className="space-y-2 mb-5">
-        {GROUPS.map((g) => (
-          <div key={g.key}>
-            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-1">{g.title}</div>
-            <div className="flex flex-wrap gap-1.5">
-              {sectionsIn(g.key).map((s) => {
-                const i = SECTIONS.indexOf(s);
-                const owed = missing.filter((m) => m.section === s.title).length;
-                const active = i === step;
-                return (
-                  <button key={s.key} onClick={() => { setStep(i); window.scrollTo(0, 0); }}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
-                      active ? 'bg-slate-900 text-white border-slate-900'
-                        : owed ? 'bg-amber-50 text-amber-700 border-amber-200'
-                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
-                    {s.title}{owed ? ` · ${owed}` : ' ✓'}
-                  </button>
-                );
-              })}
-            </div>
+        <div className="mt-4 flex items-center gap-3">
+          <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
+            <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
           </div>
-        ))}
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-        <div className="mb-4">
-          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
-            {GROUPS.find((g) => g.key === section.group)?.title}
-          </div>
-          <div className="text-base font-bold text-slate-900">{section.title}</div>
-          {section.hint && <div className="text-xs text-slate-500 mt-0.5 whitespace-pre-line">{section.hint}</div>}
+          <span className="text-xs font-semibold text-slate-500 tabular-nums shrink-0">{pct}%</span>
         </div>
+      </div>
 
-        <div className="space-y-4">
-          {visibleFields(section, answers).map((f) => {
-            const v = a[f.key];
-            const files = Array.isArray(v) ? v : v ? [v] : [];
-
-            // A confirmation is the whole control: the label IS the thing being
-            // agreed to, so it goes inside the tappable row rather than above it.
-            if (f.type === 'confirm') {
-              return (
-                <label key={f.key}
-                  className={`flex gap-3 p-3 rounded-xl border cursor-pointer transition ${
-                    v === true ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-300 hover:border-slate-400'}`}>
-                  <input type="checkbox" checked={v === true} onChange={(e) => set(f.key, e.target.checked)}
-                    className="mt-0.5 w-5 h-5 accent-emerald-600 shrink-0" />
-                  <span>
-                    <span className="block text-sm font-semibold text-slate-800">
-                      {f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}
-                    </span>
-                    {f.hint && <span className="block text-xs text-slate-500 mt-0.5 whitespace-pre-line">{f.hint}</span>}
-                  </span>
-                </label>
-              );
-            }
-
+      {/* Three tabs. The whole map of the form. */}
+      <div className="sticky top-0 z-10 -mx-4 px-4 py-2 bg-slate-100/95 backdrop-blur">
+        <div className="flex gap-1 p-1 bg-slate-200/70 rounded-xl">
+          {GROUPS.map((g, i) => {
+            const owed = owedIn(g.key);
+            const active = i === tab;
             return (
-              <div key={f.key}>
-                <label className="block text-sm font-semibold text-slate-800 mb-1">
-                  {f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}
-                </label>
-                {f.hint && <div className="text-xs text-slate-500 mb-1.5 whitespace-pre-line">{f.hint}</div>}
-
-                {f.type === 'text' && <input className={input} value={v || ''} onChange={(e) => set(f.key, e.target.value)} />}
-                {f.type === 'textarea' && <textarea rows={5} className={input + ' resize-y'} value={v || ''} onChange={(e) => set(f.key, e.target.value)} />}
-                {f.type === 'choice' && (
-                  <div className="flex flex-wrap gap-2">
-                    {f.options.map((o) => (
-                      <button key={o} type="button" onClick={() => set(f.key, v === o ? '' : o)}
-                        className={`px-3.5 py-2 rounded-xl text-sm font-semibold border transition ${
-                          v === o ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400'}`}>
-                        {o}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {f.type === 'file' && (
-                  <div>
-                    {files.length > 0 && (
-                      <div className="space-y-1.5 mb-2">
-                        {files.map((file) => (
-                          <div key={file.path} className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
-                            <span className="text-base">📎</span>
-                            <span className="text-sm text-slate-800 truncate flex-1">{file.name}</span>
-                            <span className="text-[11px] text-slate-400 font-mono shrink-0">{(file.size / 1024 / 1024).toFixed(1)}MB</span>
-                            <button onClick={() => removeFile(f, file.path)} className="text-slate-400 hover:text-red-600 text-lg leading-none shrink-0">×</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <label className={`flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed rounded-xl cursor-pointer transition ${
-                      uploading[f.key] ? 'border-slate-200 text-slate-400' : 'border-slate-300 text-slate-600 hover:border-slate-900 hover:text-slate-900'}`}>
-                      <input type="file" className="hidden" multiple={!!f.multiple} disabled={!!uploading[f.key]}
-                        onChange={(e) => { upload(f, e.target.files); e.target.value = ''; }} />
-                      <span className="text-sm font-semibold">
-                        {uploading[f.key] ? 'Uploading…' : files.length ? 'Add another file' : 'Choose file'}
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </div>
+              <button key={g.key} onClick={() => { setTab(i); window.scrollTo({ top: 0 }); }}
+                className={`flex-1 px-2 py-2 rounded-lg text-[13px] font-semibold transition flex items-center justify-center gap-1.5 ${
+                  active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                <span className="truncate">{g.title}</span>
+                {owed > 0
+                  ? <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-400 text-amber-950 text-[10px] font-bold flex items-center justify-center">{owed}</span>
+                  : <span className="shrink-0 text-emerald-600 text-xs">✓</span>}
+              </button>
             );
           })}
         </div>
       </div>
 
-      {/* Move through the pack */}
-      <div className="flex items-center gap-2 mt-4">
-        <button disabled={step === 0} onClick={() => { setStep((s) => s - 1); window.scrollTo(0, 0); }}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 disabled:opacity-30 hover:bg-slate-100">Back</button>
-        {missingHere > 0 && <span className="text-xs text-amber-700">{missingHere} still needed here</span>}
-        {step < SECTIONS.length - 1 ? (
-          <button onClick={() => { setStep((s) => s + 1); window.scrollTo(0, 0); }}
-            className="ml-auto px-5 py-2.5 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-800">Next</button>
-        ) : (
-          <button disabled={submitting} onClick={submit}
-            className="ml-auto px-5 py-2.5 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
-            {submitting ? 'Sending…' : 'Send to our team'}
-          </button>
+      <p className="text-[13px] text-slate-500 mt-3 mb-3">{group.blurb}</p>
+
+      {/* Everything in this group, one scroll */}
+      <div className="space-y-3 pb-28">
+        {sections.map((section) => {
+          const a = answers[section.key] || {};
+          return (
+            <section key={section.key} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+              <h2 className="text-[15px] font-bold text-slate-900">{section.title}</h2>
+              {section.hint && <p className="text-xs text-slate-500 mt-1 mb-1 whitespace-pre-line leading-relaxed">{section.hint}</p>}
+
+              <div className="space-y-4 mt-4">
+                {visibleFields(section, answers).map((f) => {
+                  const v = a[f.key];
+                  const busy = uploading[`${section.key}.${f.key}`];
+
+                  if (f.type === 'confirm') {
+                    return (
+                      <label key={f.key}
+                        className={`flex gap-3 p-3.5 rounded-xl border cursor-pointer transition ${
+                          v === true ? 'bg-emerald-50 border-emerald-300' : 'bg-slate-50 border-slate-200 hover:border-slate-400'}`}>
+                        <input type="checkbox" checked={v === true} onChange={(e) => set(section.key, f.key, e.target.checked)}
+                          className="mt-0.5 w-5 h-5 accent-emerald-600 shrink-0" />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-semibold text-slate-800">
+                            {f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}
+                          </span>
+                          {f.hint && <span className="block text-xs text-slate-500 mt-1 whitespace-pre-line">{f.hint}</span>}
+                        </span>
+                      </label>
+                    );
+                  }
+
+                  const files = Array.isArray(v) ? v : v ? [v] : [];
+                  return (
+                    <div key={f.key}>
+                      <label className="block text-sm font-semibold text-slate-800">
+                        {f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}
+                      </label>
+                      {f.hint && <p className="text-xs text-slate-500 mt-0.5 mb-1.5 whitespace-pre-line leading-relaxed">{f.hint}</p>}
+
+                      {f.type === 'text' && (
+                        <input className={INPUT} value={v || ''} onChange={(e) => set(section.key, f.key, e.target.value)} />
+                      )}
+                      {f.type === 'textarea' && (
+                        <textarea rows={5} className={INPUT + ' resize-y leading-relaxed'} value={v || ''}
+                          onChange={(e) => set(section.key, f.key, e.target.value)} />
+                      )}
+                      {f.type === 'choice' && (
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {f.options.map((o) => (
+                            <button key={o} type="button" onClick={() => set(section.key, f.key, v === o ? '' : o)}
+                              className={`px-4 py-2 rounded-xl text-sm font-semibold border transition ${
+                                v === o ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300 hover:border-slate-500'}`}>
+                              {o}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {f.type === 'file' && (
+                        <div className="mt-1">
+                          {files.length > 0 && (
+                            <div className="space-y-1.5 mb-2">
+                              {files.map((file) => (
+                                <div key={file.path} className="flex items-center gap-2.5 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                                  <span className="text-slate-400 shrink-0">📎</span>
+                                  <span className="text-sm text-slate-800 truncate flex-1 min-w-0">{file.name}</span>
+                                  <span className="text-[11px] text-slate-400 font-mono shrink-0">{(file.size / 1048576).toFixed(1)}MB</span>
+                                  <button onClick={() => removeFile(section.key, f, file.path)}
+                                    className="text-slate-300 hover:text-red-600 text-xl leading-none shrink-0 px-1">×</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <label className={`flex items-center justify-center gap-2 px-4 py-3.5 border-2 border-dashed rounded-xl transition ${
+                            busy ? 'border-slate-200 text-slate-400' : 'border-slate-300 text-slate-600 hover:border-slate-900 hover:text-slate-900 cursor-pointer'}`}>
+                            <input type="file" className="hidden" multiple={!!f.multiple} disabled={!!busy}
+                              onChange={(e) => { upload(section.key, f, e.target.files); e.target.value = ''; }} />
+                            <span className="text-sm font-semibold">
+                              {busy ? 'Uploading…' : files.length ? '+ Add another file' : 'Choose file'}
+                            </span>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+
+        {showMissing && missing.length > 0 && (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+            <div className="text-sm font-bold text-amber-900 mb-1.5">Still needed before you can send</div>
+            <ul className="text-[13px] text-amber-900 space-y-1">
+              {missing.map((m, i) => <li key={i}><span className="text-amber-700">{m.section}</span> — {m.field}</li>)}
+            </ul>
+          </div>
         )}
       </div>
 
-      {showMissing && missing.length > 0 && (
-        <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-          <div className="text-xs font-bold text-amber-800 mb-1">Still needed before you can send:</div>
-          <ul className="text-xs text-amber-800 space-y-0.5">
-            {missing.map((m, i) => <li key={i}>{m.section} — {m.field}</li>)}
-          </ul>
+      {/* One action, always reachable */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur border-t border-slate-200 px-4 py-3">
+        <div className="max-w-2xl mx-auto flex items-center gap-3">
+          <div className="text-xs text-slate-500 min-w-0 flex-1">
+            {missing.length === 0
+              ? <span className="text-emerald-700 font-semibold">Everything's answered</span>
+              : <>{missing.length} still needed{owedIn(group.key) === 0 ? ', on another tab' : ''}</>}
+          </div>
+          {tab < GROUPS.length - 1 ? (
+            <button onClick={() => { setTab(tab + 1); window.scrollTo({ top: 0 }); }}
+              className="px-5 py-2.5 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 shrink-0">
+              Next: {GROUPS[tab + 1].title}
+            </button>
+          ) : (
+            <button disabled={submitting} onClick={submit}
+              className="px-6 py-2.5 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 shrink-0">
+              {submitting ? 'Sending…' : 'Send to our team'}
+            </button>
+          )}
         </div>
-      )}
+      </div>
     </Frame>
   );
 }
 
+const INPUT = "w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-[15px] text-slate-900 placeholder-slate-400 focus:outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10";
+
 function Frame({ children }) {
   return (
-    <div className="min-h-screen bg-slate-100 py-6 px-4">
-      <div className="max-w-2xl mx-auto">{children}</div>
+    <div className="min-h-screen bg-slate-100">
+      <div className="max-w-2xl mx-auto px-4">{children}</div>
     </div>
   );
 }

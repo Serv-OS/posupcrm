@@ -38,6 +38,12 @@ serve(async (req) => {
   const appUrl = String(body?.app_url || "").replace(/\/+$/, "");
   if (!to.includes("@")) return json({ error: "A valid email address is required" }, 422);
   if (!appUrl) return json({ error: "Missing app_url" }, 422);
+  // Refuse to send a pack that has nowhere to land. Most onboardings sit under
+  // a partner company with dozens of venues, so falling back to the company
+  // would quietly pile every site's menu and table plan onto the partner.
+  if (!body?.location_id) {
+    return json({ error: "Choose the venue this onboarding is for before sending — the uploads attach to it." }, 422);
+  }
 
   try {
     // One pack per venue: reuse an unsubmitted request rather than stacking up

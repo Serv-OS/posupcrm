@@ -8,13 +8,18 @@ import { GROUPS, sectionsIn, visibleFields } from '../../lib/onboardingForm';
 // when, opened or not, completed when — because "have they filled it in yet" is
 // the question this card exists to answer.
 
-export default function OnboardingPackCard({ onboarding, company, location, contacts = [], profile, onChanged }) {
+export default function OnboardingPackCard({ onboarding, company, location, locations = [], contacts = [], profile, onChanged }) {
   const [req, setReq] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [sending, setSending] = useState(false);
   const [email, setEmail] = useState('');
   const [open, setOpen] = useState(false);
   const [reveal, setReveal] = useState(false);   // the WiFi password stays hidden until asked for
+  // The venue this job is for. Most onboardings sit under a partner company
+  // with dozens of venues, so without this the menu and table plan would land
+  // on the partner and tell us nothing about the site being installed.
+  const [venueId, setVenueId] = useState(onboarding.location_id || '');
+  useEffect(() => { setVenueId(onboarding.location_id || ''); }, [onboarding.location_id]);
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
   const load = async () => {
@@ -34,19 +39,27 @@ export default function OnboardingPackCard({ onboarding, company, location, cont
 
   const send = async () => {
     if (!email.includes('@')) { alert('Add the email address to send it to.'); return; }
+    if (!venueId) { alert('Choose which venue this onboarding is for first — the menu, table plan and logo attach to that venue.'); return; }
     setSending(true);
     try {
+      // Pin the job to the venue before sending. Doing it here (rather than
+      // only on the pack) means the onboarding itself is finally correct too,
+      // so every other screen stops showing the partner instead of the site.
+      if (onboarding.location_id !== venueId) {
+        const { error } = await supabase.from('onboardings').update({ location_id: venueId }).eq('id', onboarding.id);
+        if (error) { alert('Could not set the venue: ' + error.message); setSending(false); return; }
+      }
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/onboarding-form-send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
         body: JSON.stringify({
           onboarding_id: onboarding.id,
-          location_id: onboarding.location_id || location?.id || null,
+          location_id: venueId,
           company_id: onboarding.company_id || null,
           contact_id: contacts.find(c => c.email === email)?.id || null,
           contact_name: contacts.find(c => c.email === email)?.first_name || '',
-          venue: location?.name || company?.name || '',
+          venue: (locations.find(l => l.id === venueId)?.name) || location?.name || '',
           to: email,
           app_url: window.location.origin,
         }),
@@ -83,8 +96,10 @@ export default function OnboardingPackCard({ onboarding, company, location, cont
           <>
             <div className="text-xs text-muted">
               Send the customer everything we need to build their till: company and trading details, VAT, receipt logo,
-              menu, users, discounts, table plan and how their kitchen tickets should print. Uploads land on this venue.
+              menu, users, discounts, table plan, how their kitchen tickets should print, plus the site checks and
+              pre-install jobs. Everything they upload attaches to the venue below.
             </div>
+            <VenuePicker {...{ venueId, setVenueId, locations, canWrite }} />
             {canWrite && (
               <div className="flex gap-2">
                 <input className="flex-1 px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper" placeholder="customer@venue.co.uk"
@@ -98,6 +113,7 @@ export default function OnboardingPackCard({ onboarding, company, location, cont
         ) : (
           <>
             <div className="space-y-1 text-xs">
+              <Row k="Venue" v={locations.find(l => l.id === req.location_id)?.name || (req.location_id ? '—' : 'NOT SET')} />
               <Row k="Sent to" v={req.sent_to} />
               <Row k="Sent" v={fmt(req.sent_at)} />
               <Row k="Opened" v={fmt(req.opened_at) || 'not yet'} />
@@ -199,6 +215,27 @@ function empty(f, v) {
   if (f.type === 'file') return !(Array.isArray(v) ? v.length : v);
   if (f.type === 'confirm') return v !== true;
   return !String(v ?? '').trim();
+}
+
+function VenuePicker({ venueId, setVenueId, locations, canWrite }) {
+  if (!canWrite) return null;
+  return (
+    <div>
+      <label className="text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block">
+        Venue being onboarded
+      </label>
+      <select className="w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper"
+        value={venueId} onChange={e => setVenueId(e.target.value)}>
+        <option value="">— choose the venue —</option>
+        {locations.map(l => <option key={l.id} value={l.id}>{l.name}{l.city ? ` · ${l.city}` : ''}</option>)}
+      </select>
+      {!venueId && (
+        <div className="text-[10px] text-amber mt-1">
+          Required. Their menu, logo and table plan attach here, so it must be the site being installed, not the group.
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Row({ k, v }) {

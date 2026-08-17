@@ -327,6 +327,7 @@ export default function OnboardingDetail({ onboardingId, profile, onClose, onNav
                 onboarding={ob}
                 company={company}
                 location={locations.find(l => l.id === ob.location_id) || null}
+                locations={locations}
                 contacts={packContacts}
                 profile={profile}
                 onChanged={load}
