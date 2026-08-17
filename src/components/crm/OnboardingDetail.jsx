@@ -4,6 +4,7 @@ import TimerButton from './TimerButton.jsx';
 import AssociationManager from './AssociationManager.jsx';
 import ActivityTimeline from './ActivityTimeline.jsx';
 import OnboardingPackCard from './OnboardingPackCard.jsx';
+import AttachmentsCard from './AttachmentsCard.jsx';
 
 const STAGES = [
   'kickoff','hardware_ordered','hardware_shipped','account_menu_config',
@@ -332,6 +333,17 @@ export default function OnboardingDetail({ onboardingId, profile, onClose, onNav
                 profile={profile}
                 onChanged={load}
               />
+
+              {/* The customer's uploads live on the venue, but they are read
+                  here — chasing a menu should not mean opening another record. */}
+              {ob.location_id && (
+                <AttachmentsCard
+                  subjectType="location"
+                  subjectId={ob.location_id}
+                  profile={profile}
+                  title={`Files · ${locations.find(l => l.id === ob.location_id)?.name || 'this venue'}`}
+                />
+              )}
 
               <Card title="Activity">
                 <ActivityTimeline subjectType="onboarding" subjectId={onboardingId} profile={profile} />
