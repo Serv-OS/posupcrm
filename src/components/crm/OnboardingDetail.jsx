@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import TimerButton from './TimerButton.jsx';
 import AssociationManager from './AssociationManager.jsx';
 import ActivityTimeline from './ActivityTimeline.jsx';
+import OnboardingPackCard from './OnboardingPackCard.jsx';
 
 const STAGES = [
   'kickoff','hardware_ordered','hardware_shipped','account_menu_config',
@@ -32,6 +33,7 @@ export default function OnboardingDetail({ onboardingId, profile, onClose, onNav
   const [jobTypes, setJobTypes] = useState([]);
   const [showNewProject, setShowNewProject] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [packContacts, setPackContacts] = useState([]);   // contacts on this job, for the onboarding pack
 
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
@@ -60,6 +62,16 @@ export default function OnboardingDetail({ onboardingId, profile, onClose, onNav
       setCompany(c.data);
       setLocations(l.data || []);
     }
+    // Contacts linked to this onboarding — the pack is emailed to one of them.
+    const { data: assoc } = await supabase.from('associations')
+      .select('from_type, from_id, to_type, to_id')
+      .or(`and(from_type.eq.onboarding,from_id.eq.${onboardingId},to_type.eq.contact),and(to_type.eq.onboarding,to_id.eq.${onboardingId},from_type.eq.contact)`);
+    const contactIds = (assoc || []).map(x => (x.from_type === 'contact' ? x.from_id : x.to_id));
+    if (contactIds.length) {
+      const { data: cts } = await supabase.from('contacts').select('id, first_name, last_name, email').in('id', contactIds);
+      setPackContacts(cts || []);
+    } else setPackContacts([]);
+
     if (o.data?.deal_id) {
       const { data: d } = await supabase.from('deals').select('*').eq('id', o.data.deal_id).single();
       setDeal(d);
@@ -311,6 +323,15 @@ export default function OnboardingDetail({ onboardingId, profile, onClose, onNav
 
             {/* MIDDLE: Activity + Contacts */}
             <div className="col-span-4 space-y-4">
+              <OnboardingPackCard
+                onboarding={ob}
+                company={company}
+                location={locations.find(l => l.id === ob.location_id) || null}
+                contacts={packContacts}
+                profile={profile}
+                onChanged={load}
+              />
+
               <Card title="Activity">
                 <ActivityTimeline subjectType="onboarding" subjectId={onboardingId} profile={profile} />
               </Card>

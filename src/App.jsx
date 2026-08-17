@@ -4,6 +4,7 @@ import { loadBranding } from './lib/branding';
 import Auth from './components/Auth.jsx';
 import Shell from './components/Shell.jsx';
 import PublicForm from './components/PublicForm.jsx';
+import OnboardingPack from './components/OnboardingPack.jsx';
 import PublicQuote from './components/PublicQuote.jsx';
 import PublicInvoice from './components/PublicInvoice.jsx';
 import BankCallback from './components/BankCallback.jsx';
@@ -14,6 +15,8 @@ export default function App() {
 
   // Public, no-login form route: /f/<slug> (embeddable on any website)
   const formMatch = window.location.pathname.match(/^\/f\/([^/?#]+)/);
+  // Customer's onboarding pack, no login: /onboarding/<token>
+  const packMatch = window.location.pathname.match(/^\/onboarding\/([^/?#]+)/);
   // Public quote route: /q/<token>
   const quoteMatch = window.location.pathname.match(/^\/q\/([^/?#]+)/);
   // Public invoice route: /i/<token>
@@ -33,6 +36,9 @@ export default function App() {
 
   if (formMatch) {
     return <PublicForm slug={decodeURIComponent(formMatch[1])} />;
+  }
+  if (packMatch) {
+    return <OnboardingPack token={decodeURIComponent(packMatch[1])} />;
   }
   if (quoteMatch) {
     return <PublicQuote token={decodeURIComponent(quoteMatch[1])} />;

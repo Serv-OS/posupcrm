@@ -49,3 +49,8 @@ verify_jwt = false
 verify_jwt = false
 [functions.kb-learn]
 verify_jwt = false
+
+# The customer's onboarding pack: they have no login, so the token in the URL
+# is the credential. The SEND side (onboarding-form-send) stays JWT-protected.
+[functions.onboarding-form]
+verify_jwt = false
