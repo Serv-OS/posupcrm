@@ -147,7 +147,7 @@ export default function OnboardingPack({ token }) {
               <button key={g.key} onClick={() => { setTab(i); window.scrollTo({ top: 0 }); }}
                 className={`flex-1 px-2 py-2 rounded-lg text-[13px] font-semibold transition flex items-center justify-center gap-1.5 ${
                   active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
-                <span className="truncate">{g.title}</span>
+                <span className="truncate">{g.short}</span>
                 {owed > 0
                   ? <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-400 text-amber-950 text-[10px] font-bold flex items-center justify-center">{owed}</span>
                   : <span className="shrink-0 text-emerald-600 text-xs">✓</span>}
@@ -270,7 +270,7 @@ export default function OnboardingPack({ token }) {
           {tab < GROUPS.length - 1 ? (
             <button onClick={() => { setTab(tab + 1); window.scrollTo({ top: 0 }); }}
               className="px-5 py-2.5 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 shrink-0">
-              Next: {GROUPS[tab + 1].title}
+              Next: {GROUPS[tab + 1].short}
             </button>
           ) : (
             <button disabled={submitting} onClick={submit}

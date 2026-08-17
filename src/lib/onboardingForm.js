@@ -18,10 +18,13 @@
  * `sensitive` marks a value to mask in our UI (the WiFi password).
  */
 
+// `short` is what the tabs use. The full titles are honest but too long for a
+// phone: three of them overflowed a 375px screen and clipped the last tab clean
+// off, which hid a whole third of the form.
 export const GROUPS = [
-  { key: 'account', title: 'Account config', blurb: 'What we build your till from.' },
-  { key: 'install', title: 'Install information', blurb: 'What has to be true on site before our engineer travels.' },
-  { key: 'todo', title: 'Things to do', blurb: 'A couple of jobs for you before install day.' },
+  { key: 'account', title: 'Account config', short: 'Account', blurb: 'What we build your till from.' },
+  { key: 'install', title: 'Install information', short: 'Install', blurb: 'What has to be true on site before our engineer travels.' },
+  { key: 'todo', title: 'Things to do', short: 'To do', blurb: 'A couple of jobs for you before install day.' },
 ];
 
 export const SECTIONS = [
