@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { SECTIONS, visibleFields, missingRequired, summarize, allFiles } from '../lib/onboardingForm';
+import { GROUPS, SECTIONS, sectionsIn, visibleFields, missingRequired, summarize, allFiles } from '../lib/onboardingForm';
 
 // The customer's onboarding pack. No login: the token in the URL is the way in.
 //
@@ -117,33 +117,64 @@ export default function OnboardingPack({ token }) {
         </p>
       </div>
 
-      {/* Progress: every section, tappable, with what's still owed */}
-      <div className="flex flex-wrap gap-1.5 mb-5">
-        {SECTIONS.map((s, i) => {
-          const owed = missing.filter((m) => m.section === s.title).length;
-          const active = i === step;
-          return (
-            <button key={s.key} onClick={() => { setStep(i); window.scrollTo(0, 0); }}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
-                active ? 'bg-slate-900 text-white border-slate-900'
-                  : owed ? 'bg-amber-50 text-amber-700 border-amber-200'
-                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
-              {i + 1}. {s.title}{owed ? ` · ${owed}` : ' ✓'}
-            </button>
-          );
-        })}
+      {/* Progress: grouped, tappable, showing what each part still owes */}
+      <div className="space-y-2 mb-5">
+        {GROUPS.map((g) => (
+          <div key={g.key}>
+            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-1">{g.title}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {sectionsIn(g.key).map((s) => {
+                const i = SECTIONS.indexOf(s);
+                const owed = missing.filter((m) => m.section === s.title).length;
+                const active = i === step;
+                return (
+                  <button key={s.key} onClick={() => { setStep(i); window.scrollTo(0, 0); }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
+                      active ? 'bg-slate-900 text-white border-slate-900'
+                        : owed ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                    {s.title}{owed ? ` · ${owed}` : ' ✓'}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
         <div className="mb-4">
+          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+            {GROUPS.find((g) => g.key === section.group)?.title}
+          </div>
           <div className="text-base font-bold text-slate-900">{section.title}</div>
-          {section.hint && <div className="text-xs text-slate-500 mt-0.5">{section.hint}</div>}
+          {section.hint && <div className="text-xs text-slate-500 mt-0.5 whitespace-pre-line">{section.hint}</div>}
         </div>
 
         <div className="space-y-4">
           {visibleFields(section, answers).map((f) => {
             const v = a[f.key];
             const files = Array.isArray(v) ? v : v ? [v] : [];
+
+            // A confirmation is the whole control: the label IS the thing being
+            // agreed to, so it goes inside the tappable row rather than above it.
+            if (f.type === 'confirm') {
+              return (
+                <label key={f.key}
+                  className={`flex gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                    v === true ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-300 hover:border-slate-400'}`}>
+                  <input type="checkbox" checked={v === true} onChange={(e) => set(f.key, e.target.checked)}
+                    className="mt-0.5 w-5 h-5 accent-emerald-600 shrink-0" />
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-800">
+                      {f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}
+                    </span>
+                    {f.hint && <span className="block text-xs text-slate-500 mt-0.5 whitespace-pre-line">{f.hint}</span>}
+                  </span>
+                </label>
+              );
+            }
+
             return (
               <div key={f.key}>
                 <label className="block text-sm font-semibold text-slate-800 mb-1">

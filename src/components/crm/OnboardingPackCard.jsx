@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { SECTIONS, visibleFields } from '../../lib/onboardingForm';
+import { GROUPS, sectionsIn, visibleFields } from '../../lib/onboardingForm';
 
 // The onboarding pack, from our side: send it, chase it, read it.
 //
@@ -14,6 +14,7 @@ export default function OnboardingPackCard({ onboarding, company, location, cont
   const [sending, setSending] = useState(false);
   const [email, setEmail] = useState('');
   const [open, setOpen] = useState(false);
+  const [reveal, setReveal] = useState(false);   // the WiFi password stays hidden until asked for
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
   const load = async () => {
@@ -117,33 +118,64 @@ export default function OnboardingPackCard({ onboarding, company, location, cont
             )}
 
             {done && open && (
-              <div className="space-y-3 pt-2 border-t border-bdr max-h-[460px] overflow-y-auto">
-                {SECTIONS.map(sec => {
-                  const a = answers[sec.key] || {};
-                  const rows = visibleFields(sec, answers).filter(f => {
-                    const v = a[f.key];
-                    return f.type === 'file' ? (Array.isArray(v) ? v.length : !!v) : String(v ?? '').trim();
+              <div className="space-y-4 pt-2 border-t border-bdr max-h-[460px] overflow-y-auto">
+                {GROUPS.map(g => {
+                  const secs = sectionsIn(g.key).filter(sec => {
+                    const a = answers[sec.key] || {};
+                    return visibleFields(sec, answers).some(f => !empty(f, a[f.key]));
                   });
-                  if (!rows.length) return null;
+                  if (!secs.length) return null;
                   return (
-                    <div key={sec.key}>
-                      <div className="text-[10px] font-mono font-bold uppercase tracking-[0.14em] text-dim mb-1">{sec.title}</div>
-                      <div className="space-y-1.5">
-                        {rows.map(f => {
-                          const v = a[f.key];
-                          const files = f.type === 'file' ? (Array.isArray(v) ? v : [v]) : null;
+                    <div key={g.key}>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-ember mb-1.5">{g.title}</div>
+                      <div className="space-y-3">
+                        {secs.map(sec => {
+                          const a = answers[sec.key] || {};
+                          const rows = visibleFields(sec, answers).filter(f => !empty(f, a[f.key]));
                           return (
-                            <div key={f.key} className="text-xs">
-                              <div className="text-muted">{f.label}</div>
-                              {files ? (
-                                <div className="space-y-0.5 mt-0.5">
-                                  {files.map(file => (
-                                    <div key={file.path} className="text-paper">📎 {file.name}
-                                      <span className="text-dim ml-1 font-mono text-[10px]">{(file.size / 1048576).toFixed(1)}MB</span>
+                            <div key={sec.key}>
+                              <div className="text-[10px] font-mono font-bold uppercase tracking-[0.14em] text-dim mb-1">{sec.title}</div>
+                              <div className="space-y-1.5">
+                                {rows.map(f => {
+                                  const v = a[f.key];
+                                  if (f.type === 'confirm') {
+                                    return (
+                                      <div key={f.key} className="text-xs flex gap-1.5">
+                                        <span className="text-emerald-600 font-bold shrink-0">✓</span>
+                                        <span className="text-paper">{f.label}</span>
+                                      </div>
+                                    );
+                                  }
+                                  if (f.type === 'file') {
+                                    const files = Array.isArray(v) ? v : [v];
+                                    return (
+                                      <div key={f.key} className="text-xs">
+                                        <div className="text-muted">{f.label}</div>
+                                        <div className="space-y-0.5 mt-0.5">
+                                          {files.map(file => (
+                                            <div key={file.path} className="text-paper">📎 {file.name}
+                                              <span className="text-dim ml-1 font-mono text-[10px]">{(file.size / 1048576).toFixed(1)}MB</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <div key={f.key} className="text-xs">
+                                      <div className="text-muted">{f.label}</div>
+                                      {f.sensitive ? (
+                                        <div className="text-paper font-mono flex items-center gap-2">
+                                          <span>{reveal ? String(v) : '••••••••••'}</span>
+                                          <button onClick={() => setReveal(r => !r)} className="text-[10px] text-ember hover:underline">
+                                            {reveal ? 'hide' : 'show'}
+                                          </button>
+                                        </div>
+                                      ) : <div className="text-paper whitespace-pre-wrap">{String(v)}</div>}
                                     </div>
-                                  ))}
-                                </div>
-                              ) : <div className="text-paper whitespace-pre-wrap">{String(v)}</div>}
+                                  );
+                                })}
+                              </div>
                             </div>
                           );
                         })}
@@ -159,6 +191,14 @@ export default function OnboardingPackCard({ onboarding, company, location, cont
       </div>
     </div>
   );
+}
+
+// Mirrors the definition's own idea of "answered" so the card never shows an
+// empty heading for a question the customer skipped.
+function empty(f, v) {
+  if (f.type === 'file') return !(Array.isArray(v) ? v.length : v);
+  if (f.type === 'confirm') return v !== true;
+  return !String(v ?? '').trim();
 }
 
 function Row({ k, v }) {
