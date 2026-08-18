@@ -127,9 +127,11 @@ export default function OnboardingBoard({ profile, onSelectOnboarding, onNavigat
               </div>
               <div className="flex-1 overflow-y-auto p-1.5 space-y-1.5">
                 {(byStage[stage.key] || []).map(o => {
+                  // Venue first: a card that leads with the company reads as
+                  // "Lightspeed Netherlands" twenty-four times over. The venue
+                  // is the only line that tells you which job this is.
                   const rows = [
                     ['Company', companyName(o.company_id)],
-                    ['Location', locationName(o)],
                     ['Deal', dealName(o.deal_id)],
                     ['Call', fmtDT(o.kickoff_at)],
                     ['Exp. install', fmtD(o.expected_install_date)],
@@ -143,6 +145,9 @@ export default function OnboardingBoard({ profile, onSelectOnboarding, onNavigat
                       onDragStart={e => onDragStart(e, o)}
                       onClick={() => onSelectOnboarding(o.id)}
                       className="glass-inner rounded-xl p-3 cursor-pointer">
+                      <div className="text-[11px] font-bold text-paper truncate mb-1.5">
+                        {locationName(o) || companyName(o.company_id) || 'Unnamed job'}
+                      </div>
                       <table className="w-full text-xs">
                         <tbody>
                           {rows.map(([k, v]) => (

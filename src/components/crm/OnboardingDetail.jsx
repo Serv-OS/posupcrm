@@ -146,6 +146,7 @@ export default function OnboardingDetail({ onboardingId, profile, onClose, onNav
   if (!ob) return <div className="h-full flex items-center justify-center text-dim text-sm">Loading...</div>;
 
   const ownerName = (id) => { const m = members.find(u => u.id === id); return m ? (m.display_name || m.email.split('@')[0]) : 'Unassigned'; };
+  const venue = locations.find(l => l.id === ob.location_id) || null;
 
   const input = "w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember";
   const label = "text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block";
@@ -157,16 +158,27 @@ export default function OnboardingDetail({ onboardingId, profile, onClose, onNav
         <button onClick={onClose} className="text-muted hover:text-paper text-lg">&larr;</button>
         <div className="flex-1 min-w-0">
           <div className="text-xl font-bold text-paper truncate">
-            {company?.name || 'Unknown'} Onboarding
+            {venue?.name || company?.name || 'Unknown'} Onboarding
           </div>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <span className="badge-status bg-orange-100 text-orange-700 border border-orange-200">{STAGE_LABELS[ob.stage]}</span>
             <span className="text-xs text-muted">Owner: {ownerName(ob.owner_id)}</span>
+            {/* The venue is the primary link: this job installs a till at a
+                site, not at a company. The company sits one step behind. */}
+            {venue && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-lg bg-ember/10 text-ember-deep border border-ember/25 cursor-pointer hover:border-ember/50"
+                onClick={() => onNavigate?.('location', venue.id)}>
+                {'\u{1F4CD}'} {venue.name}{venue.city ? ` · ${venue.city}` : ''}
+              </span>
+            )}
             {company && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-lg bg-slate-100 text-slate-600 border border-slate-200 cursor-pointer hover:border-slate-300"
                 onClick={() => onNavigate?.('company', company.id)}>
                 {'\u{1F3E2}'} {company.name}
               </span>
+            )}
+            {!venue && (
+              <span className="text-[10px] font-bold text-amber">No venue set — set one so the pack and files land on the site</span>
             )}
           </div>
         </div>
@@ -281,32 +293,52 @@ export default function OnboardingDetail({ onboardingId, profile, onClose, onNav
                 </div>
               </Card>
 
+              <Card title="Venue being onboarded">
+                {venue ? (
+                  <div onClick={() => onNavigate?.('location', venue.id)}
+                    className="p-3 glass-inner rounded-xl cursor-pointer flex items-center gap-3 border-l-2 border-ember">
+                    <div className="w-10 h-10 rounded-xl bg-ember/15 border border-ember/25 flex items-center justify-center text-lg shrink-0">{'\u{1F4CD}'}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-base font-semibold text-paper truncate">{venue.name}</div>
+                      <div className="text-xs text-muted">{[venue.venue_type, venue.city].filter(Boolean).join(' / ') || 'Venue'}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <Empty>No venue set. Use Edit to choose which site this job is for.</Empty>
+                )}
+              </Card>
+
               <Card title="Company">
                 {company ? (
                   <div onClick={() => onNavigate?.('company', company.id)}
                     className="p-3 glass-inner rounded-xl cursor-pointer flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-ember/15 border border-ember/25 flex items-center justify-center text-lg shrink-0">{'\u{1F3E2}'}</div>
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-lg shrink-0">{'\u{1F3E2}'}</div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-base font-semibold text-paper">{company.name}</div>
+                      <div className="text-sm font-semibold text-paper truncate">{company.name}</div>
                       <div className="text-xs text-muted">{company.domain || company.industry || 'Company'}</div>
                     </div>
                   </div>
                 ) : <Empty>No company</Empty>}
               </Card>
 
-              <Card title="Locations" count={locations.length}>
-                {locations.length > 0 ? (
-                  <div className="space-y-2">
-                    {locations.map(l => (
-                      <div key={l.id} onClick={() => onNavigate?.('location', l.id)}
-                        className="p-3 glass-inner rounded-xl cursor-pointer">
-                        <div className="text-sm font-medium text-paper">{l.name}</div>
-                        <div className="text-xs text-muted">{[l.venue_type, l.city].filter(Boolean).join(' / ')}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : <Empty>No locations</Empty>}
-              </Card>
+              {/* Other venues at this company: useful context, but they are not
+                  what this job is about, so they no longer sit alongside it. */}
+              {locations.filter(l => l.id !== ob.location_id).length > 0 && (
+                <Card title="Other venues at this company" count={locations.filter(l => l.id !== ob.location_id).length}>
+                  <details>
+                    <summary className="text-xs text-muted cursor-pointer">Show</summary>
+                    <div className="space-y-2 mt-2">
+                      {locations.filter(l => l.id !== ob.location_id).map(l => (
+                        <div key={l.id} onClick={() => onNavigate?.('location', l.id)}
+                          className="p-2.5 glass-inner rounded-xl cursor-pointer">
+                          <div className="text-sm text-paper truncate">{l.name}</div>
+                          <div className="text-[11px] text-muted">{[l.venue_type, l.city].filter(Boolean).join(' / ')}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </Card>
+              )}
 
               {deal && (
                 <Card title="From Deal">
