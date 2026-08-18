@@ -58,8 +58,25 @@ serve(async (req) => {
     .from("onboarding_form_requests")
     .select("id, location_id, company_id, onboarding_id, answers, submitted_at, sent_to")
     .eq("token", token).maybeSingle();
+
   // Same answer for a bad token and a deleted one: nothing to probe for.
   if (!reqRow) return json({ error: "This link is not valid. Please ask your account manager for a new one." }, 404);
+
+  // A pack created before its onboarding knew its venue would otherwise attach
+  // the customer's menu and logo to the COMPANY — and on a partner company with
+  // two dozen venues that is the difference between a useful record and a pile.
+  // The onboarding is the authority on which venue this job is for, so fill a
+  // blank from it. An explicitly chosen venue on the request is never overridden.
+  if (!reqRow.location_id && reqRow.onboarding_id) {
+    const { data: onb } = await supabase.from("onboardings")
+      .select("location_id").eq("id", reqRow.onboarding_id).maybeSingle();
+    if (onb?.location_id) {
+      reqRow.location_id = onb.location_id;
+      await supabase.from("onboarding_form_requests")
+        .update({ location_id: onb.location_id, updated_at: new Date().toISOString() })
+        .eq("id", reqRow.id);
+    }
+  }
 
   // Whose pack this is, for the page header.
   let venue = "";
