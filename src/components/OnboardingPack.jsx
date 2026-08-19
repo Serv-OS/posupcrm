@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { GROUPS, SECTIONS, sectionsIn, visibleFields, missingRequired, summarize, allFiles } from '../lib/onboardingForm';
+import BookingInvite from './BookingInvite.jsx';
 
 // The customer's onboarding pack. No login: the token in the URL is the way in.
 //
@@ -114,6 +115,11 @@ export default function OnboardingPack({ token }) {
         Your pack is with our team{state.venue ? <> for <strong>{state.venue}</strong></> : null}. We'll be in touch if
         anything needs clarifying, and you'll hear from us with next steps shortly.
       </p>
+      <div className="mt-8 text-left">
+        <BookingInvite venue={state.venue} prefill={{
+          name: answers?.company?.contact_name || answers?.signoff?.full_name || '',
+        }} />
+      </div>
     </div></Frame>
   );
 
@@ -261,6 +267,12 @@ export default function OnboardingPack({ token }) {
             </section>
           );
         })}
+
+        {tab === GROUPS.length - 1 && (
+          <BookingInvite venue={state.venue} compact prefill={{
+            name: answers?.company?.contact_name || answers?.signoff?.full_name || '',
+          }} />
+        )}
 
         {showMissing && missing.length > 0 && (
           <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl">

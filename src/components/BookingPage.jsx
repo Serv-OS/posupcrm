@@ -30,7 +30,13 @@ export default function BookingPage({ slug }) {
   const [calendarOk, setCalendarOk] = useState(true);
   const [day, setDay] = useState(null);
   const [slot, setSlot] = useState(null);
-  const [form, setForm] = useState({ name: '', email: '', phone: '', company: '', notes: '' });
+  // Arriving from the onboarding pack, we already know who they are and which
+  // venue this is about, and they may have clicked a specific time.
+  const params = useMemo(() => new URLSearchParams(window.location.search), []);
+  const [form, setForm] = useState({
+    name: params.get('name') || '', email: params.get('email') || '',
+    phone: '', company: params.get('company') || '', notes: '',
+  });
   const [booking, setBooking] = useState(false);
   const [done, setDone] = useState(null);
   const tz = useMemo(myZone, []);
@@ -70,6 +76,13 @@ export default function BookingPage({ slug }) {
   }, [slots, tz]);
 
   useEffect(() => { if (!day && byDay.length) setDay(byDay[0][0]); }, [byDay, day]);
+
+  // A time clicked in the pack jumps straight to the form — but only if it is
+  // still genuinely free, so a stale link cannot skip the availability check.
+  useEffect(() => {
+    const want = params.get('slot');
+    if (want && !slot && slots.includes(want)) { setSlot(want); setDay(dayKey(want, tz)); }
+  }, [slots, params, slot, tz]);
 
   const confirm = async () => {
     if (!form.name.trim() || !form.email.includes('@')) { alert('Please add your name and email.'); return; }
