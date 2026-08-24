@@ -73,6 +73,28 @@ export default function OnboardingPackCard({ onboarding, company, location, loca
     setSending(false);
   };
 
+  // Make the pack without sending anything: for when you want to paste the
+  // link into WhatsApp, a text, or an email you are writing yourself.
+  const createLink = async () => {
+    if (!venueId) { alert('Choose which venue this onboarding is for first — the menu, table plan and logo attach to that venue.'); return; }
+    setSending(true);
+    try {
+      if (onboarding.location_id !== venueId) {
+        const { error } = await supabase.from('onboardings').update({ location_id: venueId }).eq('id', onboarding.id);
+        if (error) throw error;
+      }
+      const token = (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 40);
+      const { error } = await supabase.from('onboarding_form_requests').insert({
+        onboarding_id: onboarding.id, location_id: venueId,
+        company_id: onboarding.company_id || null, token, created_by: profile.id,
+      });
+      if (error) throw error;
+      await load();
+      onChanged?.();
+    } catch (e) { alert('Could not create the link: ' + e.message); }
+    setSending(false);
+  };
+
   const link = req ? `${window.location.origin}/onboarding/${req.token}` : '';
   const answers = req?.answers || {};
   const done = !!req?.submitted_at;
@@ -101,13 +123,22 @@ export default function OnboardingPackCard({ onboarding, company, location, loca
             </div>
             <VenuePicker {...{ venueId, setVenueId, locations, canWrite }} />
             {canWrite && (
-              <div className="flex gap-2">
-                <input className="flex-1 px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper" placeholder="customer@venue.co.uk"
-                  value={email} onChange={e => setEmail(e.target.value)} />
-                <button disabled={sending} onClick={send} className="btn-glass px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 whitespace-nowrap">
-                  {sending ? 'Sending…' : 'Send pack'}
-                </button>
-              </div>
+              <>
+                <div className="flex gap-2">
+                  <input className="flex-1 px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper" placeholder="customer@venue.co.uk"
+                    value={email} onChange={e => setEmail(e.target.value)} />
+                  <button disabled={sending} onClick={send} className="btn-glass px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 whitespace-nowrap">
+                    {sending ? 'Sending…' : 'Email it'}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-dim">or</span>
+                  <button disabled={sending} onClick={createLink}
+                    className="btn-ghost px-3 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-50">
+                    Just create a link to copy
+                  </button>
+                </div>
+              </>
             )}
           </>
         ) : (
@@ -126,8 +157,8 @@ export default function OnboardingPackCard({ onboarding, company, location, loca
 
             <div className="space-y-1 text-xs">
               <Row k="Venue" v={locations.find(l => l.id === req.location_id)?.name || (req.location_id ? '—' : 'NOT SET')} />
-              <Row k="Sent to" v={req.sent_to} />
-              <Row k="Sent" v={fmt(req.sent_at)} />
+              <Row k="Sent to" v={req.sent_to || 'link only, not emailed'} />
+              <Row k="Sent" v={fmt(req.sent_at) || 'not emailed'} />
               <Row k="Opened" v={fmt(req.opened_at) || 'not yet'} />
               <Row k="Completed" v={fmt(req.submitted_at) || 'not yet'} />
             </div>
@@ -140,9 +171,13 @@ export default function OnboardingPackCard({ onboarding, company, location, loca
             </div>
 
             {!done && canWrite && (
-              <button disabled={sending} onClick={send} className="btn-ghost px-3 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-50">
-                {sending ? 'Sending…' : 'Send the link again'}
-              </button>
+              <div className="flex gap-2 items-center flex-wrap">
+                <input className="flex-1 min-w-[180px] px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper"
+                  placeholder="customer@venue.co.uk" value={email} onChange={e => setEmail(e.target.value)} />
+                <button disabled={sending} onClick={send} className="btn-ghost px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-50 whitespace-nowrap">
+                  {sending ? 'Sending…' : req.sent_at ? 'Email it again' : 'Email it'}
+                </button>
+              </div>
             )}
 
             {done && open && (
