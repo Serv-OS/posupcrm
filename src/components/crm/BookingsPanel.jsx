@@ -12,22 +12,58 @@ const DAYS = [['1','Monday'],['2','Tuesday'],['3','Wednesday'],['4','Thursday'],
 const ZONES = ['America/Los_Angeles','America/New_York','Europe/London','Europe/Dublin','Australia/Sydney','UTC'];
 
 export default function BookingsPanel({ profile }) {
-  const [bt, setBt] = useState(null);
+  const [types, setTypes] = useState([]);
+  const [bt, setBt] = useState(null);        // the one being edited
   const [bookings, setBookings] = useState([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
   const myZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  const load = async () => {
+  const load = async (keepId) => {
     const [t, b] = await Promise.all([
-      supabase.from('booking_types').select('*').eq('slug', 'onboarding-call').maybeSingle(),
+      supabase.from('booking_types').select('*').order('created_at'),
       supabase.from('bookings').select('*').order('starts_at', { ascending: true }),
     ]);
-    setBt(t.data || null);
+    const list = t.data || [];
+    setTypes(list);
+    const want = keepId || bt?.id;
+    setBt(list.find(x => x.id === want) || list[0] || null);
     setBookings(b.data || []);
   };
   useEffect(() => { load(); }, []);
+
+  // A new meeting type starts from the one you are looking at, because the
+  // hours and timezone are almost always the same — it is the name, length and
+  // description that differ.
+  const addType = async () => {
+    const name = prompt('What is this meeting called?\n\ne.g. Discovery call, Demo, Support catch-up');
+    if (!name?.trim()) return;
+    const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'meeting';
+    let slug = base, n = 2;
+    while (types.some(t => t.slug === slug)) slug = `${base}-${n++}`;
+    const { data, error } = await supabase.from('booking_types').insert({
+      slug, name: name.trim(),
+      host_user_id: bt?.host_user_id || profile.id, host_email: bt?.host_email || profile.email,
+      timezone: bt?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      hours: bt?.hours || {}, duration_mins: bt?.duration_mins || 30,
+      buffer_mins: bt?.buffer_mins ?? 15, min_notice_hrs: bt?.min_notice_hrs ?? 12,
+      max_days_ahead: bt?.max_days_ahead ?? 30, slot_step_mins: bt?.slot_step_mins ?? 30,
+    }).select().single();
+    if (error) { alert('Could not create: ' + error.message); return; }
+    load(data.id);
+  };
+
+  const removeType = async () => {
+    if (types.length <= 1) { alert('This is your only meeting type. Create another before removing this one.'); return; }
+    const used = bookings.some(b => b.booking_type_id === bt.id && b.status === 'confirmed' && new Date(b.starts_at) >= new Date());
+    const msg = used
+      ? `"${bt.name}" has upcoming bookings.\n\nTurning it off stops NEW bookings but keeps the ones already made. Continue?`
+      : `Turn off "${bt.name}"? Its link will stop working.`;
+    if (!confirm(msg)) return;
+    await supabase.from('booking_types').update({ active: false }).eq('id', bt.id);
+    load();
+  };
 
   const save = async () => {
     setSaving(true);
@@ -59,7 +95,7 @@ export default function BookingsPanel({ profile }) {
         <div>
           <div className="text-lg font-bold text-paper">Booking page</div>
           <div className="text-[10px] text-dim font-mono uppercase tracking-[0.18em]">
-            {upcoming.length} upcoming · your hours are in {bt.timezone.replace(/_/g,' ')}
+            {types.length} meeting type{types.length === 1 ? '' : 's'} · {upcoming.length} upcoming · hours in {bt.timezone.replace(/_/g,' ')}
           </div>
         </div>
         {canWrite && (
@@ -70,10 +106,38 @@ export default function BookingsPanel({ profile }) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4 max-w-3xl">
+        {/* Which meeting. Each one is a separate link you can send. */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {types.map(t => (
+            <button key={t.id} onClick={() => setBt(t)}
+              className={`px-3 py-2 rounded-xl text-sm font-semibold border transition ${
+                t.id === bt.id ? 'bg-ember text-white border-ember'
+                  : t.active ? 'bg-card text-muted border-bdr hover:text-paper' : 'bg-card text-dim border-bdr line-through'}`}>
+              {t.name} <span className="opacity-60 font-normal">· {t.duration_mins}m</span>
+            </button>
+          ))}
+          {canWrite && (
+            <button onClick={addType} className="px-3 py-2 rounded-xl text-sm font-semibold text-ember border border-dashed border-ember/40 hover:bg-ember/5">
+              + New meeting type
+            </button>
+          )}
+        </div>
+
+        {!bt.active && (
+          <div className="p-3 rounded-xl bg-amber/10 border border-amber/30 text-xs text-amber">
+            This one is turned off, so its link no longer takes bookings.
+            {canWrite && <button onClick={async () => { await supabase.from('booking_types').update({ active: true }).eq('id', bt.id); load(bt.id); }}
+              className="ml-2 font-bold underline">Turn it back on</button>}
+          </div>
+        )}
+
         {/* The link */}
         <div className="glass-card rounded-2xl p-4">
-          <div className="text-sm font-bold text-paper mb-1">Share this link</div>
-          <div className="text-xs text-muted mb-2">Anyone with it sees your real availability and books straight into your calendar.</div>
+          <div className="text-sm font-bold text-paper mb-1">Link for "{bt.name}"</div>
+          <div className="text-xs text-muted mb-2">
+            Each meeting type has its own link and its own length. Anyone with this one sees your real availability
+            and books straight into your calendar.
+          </div>
           <div className="flex gap-2">
             <input readOnly value={link} onFocus={e => e.target.select()} className={input + ' flex-1 font-mono text-xs'} />
             <button onClick={() => { navigator.clipboard.writeText(link); alert('Link copied'); }} className="btn-ghost px-3 py-1.5 rounded-xl text-xs shrink-0">Copy</button>
@@ -99,13 +163,18 @@ export default function BookingsPanel({ profile }) {
             <L label="Slot every"><select className={input + ' w-full'} value={bt.slot_step_mins} onChange={e => setBt(p => ({ ...p, slot_step_mins: +e.target.value }))} disabled={!canWrite}>
               {[15,30,60].map(n => <option key={n} value={n}>{n} min</option>)}</select></L>
             <L label="Calendar"><input className={input + ' w-full'} value={bt.host_email || ''} onChange={e => setBt(p => ({ ...p, host_email: e.target.value }))} disabled={!canWrite} /></L>
+            <L label="Link ending"><input className={input + ' w-full font-mono text-xs'} value={bt.slug}
+              onChange={e => setBt(p => ({ ...p, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') }))} disabled={!canWrite} /></L>
           </div>
           <L label="Description"><textarea rows={2} className={input + ' w-full resize-y'} value={bt.description || ''} onChange={e => setBt(p => ({ ...p, description: e.target.value }))} disabled={!canWrite} /></L>
+          {canWrite && types.length > 1 && (
+            <button onClick={removeType} className="text-xs text-red-600 hover:underline">Turn off this meeting type</button>
+          )}
         </div>
 
         {/* Hours */}
         <div className="glass-card rounded-2xl p-4">
-          <div className="text-sm font-bold text-paper">When you're bookable</div>
+          <div className="text-sm font-bold text-paper">When you're bookable for "{bt.name}"</div>
           <div className="text-xs text-muted mb-3">
             In <span className="text-paper font-semibold">{bt.timezone.replace(/_/g,' ')}</span>. Bookers always see these converted to their own time.
           </div>
@@ -143,10 +212,10 @@ export default function BookingsPanel({ profile }) {
 
         {/* Who's booked */}
         <div className="glass-card rounded-2xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-bdr text-sm font-bold text-paper">Upcoming ({upcoming.length})</div>
+          <div className="px-4 py-3 border-b border-bdr text-sm font-bold text-paper">Upcoming ({upcoming.length}) · all meeting types</div>
           {upcoming.length === 0 ? <div className="p-6 text-center text-xs text-dim italic">Nothing booked yet.</div> : (
             <div className="divide-y divide-bdr">
-              {upcoming.map(b => <BookingRow key={b.id} b={b} myZone={myZone} />)}
+              {upcoming.map(b => <BookingRow key={b.id} b={b} myZone={myZone} typeName={types.find(t => t.id === b.booking_type_id)?.name} />)}
             </div>
           )}
         </div>
@@ -155,7 +224,7 @@ export default function BookingsPanel({ profile }) {
           <div className="glass-card rounded-2xl overflow-hidden">
             <div className="px-4 py-3 border-b border-bdr text-sm font-bold text-paper">Past &amp; cancelled ({past.length})</div>
             <div className="divide-y divide-bdr opacity-70">
-              {past.slice(-10).reverse().map(b => <BookingRow key={b.id} b={b} myZone={myZone} />)}
+              {past.slice(-10).reverse().map(b => <BookingRow key={b.id} b={b} myZone={myZone} typeName={types.find(t => t.id === b.booking_type_id)?.name} />)}
             </div>
           </div>
         )}
@@ -164,7 +233,7 @@ export default function BookingsPanel({ profile }) {
   );
 }
 
-function BookingRow({ b, myZone }) {
+function BookingRow({ b, myZone, typeName }) {
   const when = new Date(b.starts_at);
   return (
     <div className="px-4 py-3 flex items-start gap-3 flex-wrap">
@@ -181,6 +250,7 @@ function BookingRow({ b, myZone }) {
       </div>
       <div className="flex-1 min-w-[180px]">
         <div className="text-sm text-paper">{b.name}{b.company ? ` · ${b.company}` : ''}</div>
+        {typeName && <div className="text-[10px] font-bold uppercase tracking-wide text-ember">{typeName}</div>}
         <div className="text-xs text-muted">{b.email}{b.phone ? ` · ${b.phone}` : ''}</div>
         {b.notes && <div className="text-xs text-muted mt-1 whitespace-pre-wrap">{b.notes}</div>}
       </div>
