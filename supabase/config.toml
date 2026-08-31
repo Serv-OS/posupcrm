@@ -45,6 +45,11 @@ verify_jwt = false
 # bare 401 and the Activity tab showed "Load failed".
 [functions.team-activity]
 verify_jwt = false
+# Same shape as team-activity: verifies the caller's JWT and their role INSIDE
+# the function (and scopes owner-only data out for everyone else), which the
+# gateway's blanket "any valid JWT" check cannot do.
+[functions.ai-ask]
+verify_jwt = false
 [functions.bank-sync]
 verify_jwt = false
 [functions.chat]

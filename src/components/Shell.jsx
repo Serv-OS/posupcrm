@@ -38,6 +38,7 @@ import GlobalSearch from './GlobalSearch.jsx';
 import AccountPanel from './AccountPanel.jsx';
 import Board from './Board.jsx';
 import UsersPanel from './UsersPanel.jsx';
+import AskPanel from './AskPanel.jsx';
 import FeaturesPanel from './FeaturesPanel.jsx';
 import ItemDetail from './ItemDetail.jsx';
 import CompanyList from './crm/CompanyList.jsx';
@@ -76,7 +77,7 @@ import DataPanel from './crm/DataPanel.jsx';
 import LeadDetail from './crm/LeadDetail.jsx';
 import ProductsPanel from './crm/ProductsPanel.jsx';
 import QuoteBuilder from './crm/QuoteBuilder.jsx';
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon, Sparkles } from 'lucide-react';
 
 // The URL reflects the current view so refresh, the browser back button and
 // "open in new tab" all land on the right page. Scheme: #<view> for a
@@ -98,6 +99,7 @@ export default function Shell({ session }) {
   const [detailId, setDetailId] = useState(() => parseHash().detailId);
   const firstUrlSync = useRef(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
   const [leadPrefill, setLeadPrefill] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem('servos-crm-theme') || 'light');
 
@@ -235,6 +237,13 @@ export default function Shell({ session }) {
       </div>
     );
   }
+
+  const askScope = (() => {
+    if (view === 'ticket_detail' && detailId) return { type: 'ticket', id: detailId };
+    if (view === 'company_detail' && detailId) return { type: 'company', id: detailId };
+    if (view === 'tickets' || view === 'inbox') return { type: 'support' };
+    return { type: 'overview' };
+  })();
 
   const renderMain = () => {
     switch (view) {
@@ -433,6 +442,10 @@ export default function Shell({ session }) {
             title={theme === 'dark' ? 'Light mode' : 'Dark mode'}>
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
+          <button onClick={() => setAskOpen(true)} title="Ask about what you're looking at"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-ember/15 text-ember-deep border border-ember/25 hover:bg-ember/25 transition text-xs font-semibold">
+            <Sparkles size={14} /> <span className="hidden sm:inline">Ask</span>
+          </button>
           <NotificationBell profile={profile} onNavigate={navigateTo} />
         </div>
       </div>
@@ -440,6 +453,7 @@ export default function Shell({ session }) {
         {renderMain()}
       </main>
       </div>
+      <AskPanel open={askOpen} onClose={() => setAskOpen(false)} scope={askScope} />
       {openItem && (
         <ItemDetail
           itemId={openItem}
