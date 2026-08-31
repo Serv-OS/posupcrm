@@ -2,6 +2,20 @@ import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { ChevronLeft, ChevronRight, Check, AlertTriangle, Plane, Ban } from 'lucide-react';
 import { isoDate, mondayOf, weekDays, DOW_SHORT, fmtRange, shiftHours } from '../../lib/staffing';
+import MonthReport from './MonthReport.jsx';
+
+function PeriodTabs({ period, setPeriod }) {
+  return (
+    <div className="px-4 lg:px-6 pt-3 flex gap-1 border-b border-bdr shrink-0">
+      {[['week', 'By week'], ['month', 'Month (for payroll)']].map(([k, lbl]) => (
+        <button key={k} onClick={() => setPeriod(k)}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-t-lg transition ${
+            period === k ? 'bg-card text-paper border border-b-0 border-bdr' : 'text-muted hover:text-paper'
+          }`}>{lbl}</button>
+      ))}
+    </div>
+  );
+}
 
 // The week's timesheet: what each person was scheduled, what they actually
 // clocked, and the difference — with holiday and sick sitting on the same row
@@ -51,6 +65,7 @@ export default function TimesheetsView({ profile }) {
   // the database enforces it too, so hiding the screen is not the whole fence.
   const canApprove = profile.role === 'owner';
   const [edit, setEdit] = useState(null);   // { punch, tz, name }
+  const [period, setPeriod] = useState('week');
   const days = weekDays(monday);
   const weekStart = isoDate(days[0]);
   const weekEnd = isoDate(days[6]);
@@ -92,6 +107,16 @@ export default function TimesheetsView({ profile }) {
   if (profile.role !== 'owner') {
     return <div className="p-8 text-muted text-sm">Only the owner can see the team's timesheets. Your own hours are on the Schedule screen.</div>;
   }
+  // Two jobs, two periods: the week is where you check and correct a day, the
+  // month is where you sign the whole thing off before paying anyone.
+  if (period === 'month') {
+    return (
+      <div className="h-full flex flex-col">
+        <PeriodTabs period={period} setPeriod={setPeriod} />
+        <MonthReport profile={profile} />
+      </div>
+    );
+  }
   if (loading) return <div className="p-8 text-dim text-sm">Loading timesheets…</div>;
 
   const saveEdit = async () => {
@@ -115,6 +140,7 @@ export default function TimesheetsView({ profile }) {
 
   return (
     <div className="h-full flex flex-col">
+      <PeriodTabs period={period} setPeriod={setPeriod} />
       <div className="px-4 lg:px-6 py-4 border-b border-bdr flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-1">
           <button onClick={() => setMonday(m => { const x = new Date(m); x.setDate(x.getDate() - 7); return x; })} className="btn-ghost p-2 rounded-xl"><ChevronLeft size={16} /></button>
