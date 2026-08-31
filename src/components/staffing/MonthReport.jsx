@@ -14,8 +14,22 @@ import { ChevronLeft, ChevronRight, Download, Check, AlertTriangle } from 'lucid
 
 const asHrs = (m) => `${Math.floor((m || 0) / 60)}h ${String(Math.round((m || 0) % 60)).padStart(2, '0')}m`;
 const dec = (m) => ((m || 0) / 60).toFixed(2);           // 7.50 — what payroll wants
-const monthName = (d) => d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const dayMon = (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+// The pay period is not the calendar month. With startDay = 27, "September"
+// runs 27 Aug -> 26 Sep. startDay = 1 gives an ordinary calendar month.
+// Returns the period CONTAINING `d`.
+function periodOf(d, startDay) {
+  const y = d.getFullYear(), m = d.getMonth();
+  const start = d.getDate() >= startDay ? new Date(y, m, startDay) : new Date(y, m - 1, startDay);
+  const end = new Date(start.getFullYear(), start.getMonth() + 1, startDay - 1);
+  return { start, end };
+}
+// Named for the month it ENDS in — a period closing 26 Sep is September's pay.
+const periodLabel = (start, end, startDay) => startDay === 1
+  ? start.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+  : `${dayMon(start)} – ${dayMon(end)} ${end.getFullYear()}`;
 
 // Overlap in days between a leave row and the month, so a holiday spanning the
 // month end counts only the part that falls inside it.
@@ -35,15 +49,23 @@ const esc = (v) => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? '"' 
 const safe = (v) => { const s = String(v ?? ''); return /^[=+\-@]/.test(s) ? "'" + s : s; };
 
 export default function MonthReport({ profile }) {
-  const [anchor, setAnchor] = useState(() => { const d = new Date(); d.setDate(1); return d; });
+  const [startDay, setStartDay] = useState(null);     // null until settings load
+  const [anchor, setAnchor] = useState(new Date());    // any date inside the period
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  const from = iso(new Date(anchor.getFullYear(), anchor.getMonth(), 1));
-  const to = iso(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0));
+  useEffect(() => {
+    supabase.from('support_settings').select('pay_period_start_day').eq('id', 1).maybeSingle()
+      .then(({ data }) => setStartDay(data?.pay_period_start_day || 1));
+  }, []);
+
+  const { start, end } = periodOf(anchor, startDay || 1);
+  const from = iso(start);
+  const to = iso(end);
 
   const load = useCallback(async () => {
+    if (startDay === null) return;         // don't query on a guessed period
     setLoading(true);
     const [p, pu, off] = await Promise.all([
       supabase.from('profiles').select('id, display_name, email, timezone').order('display_name'),
@@ -75,7 +97,7 @@ export default function MonthReport({ profile }) {
       };
     }).filter(r => r.punches.length || r.holiday || r.sick));
     setLoading(false);
-  }, [from, to]);
+  }, [from, to, startDay]);
   useEffect(() => { load(); }, [load]);
 
   const approveAll = async (ids) => {
@@ -101,16 +123,16 @@ export default function MonthReport({ profile }) {
       dec(rows.reduce((s, r) => s + r.worked, 0)), dec(rows.reduce((s, r) => s + r.approvedMins, 0)),
       dec(rows.reduce((s, r) => s + r.pendingMins, 0)), '', '', '',
       rows.reduce((s, r) => s + r.holiday, 0), rows.reduce((s, r) => s + r.sick, 0), ''];
-    const csv = '﻿' + [[`Timesheet ${monthName(anchor)}`, from, to], [], head, ...body, [], totals]
+    const csv = '﻿' + [[`Timesheet ${periodLabel(start, end, startDay || 1)}`, from, to], [], head, ...body, [], totals]
       .map(r => r.map(esc).join(',')).join('\r\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-    a.download = `timesheet-${from.slice(0, 7)}.csv`;
+    a.download = `timesheet-${from}-to-${to}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
 
-  if (loading) return <div className="p-8 text-dim text-sm">Loading the month…</div>;
+  if (startDay === null || loading) return <div className="p-8 text-dim text-sm">Loading the pay period…</div>;
 
   const allPending = rows.flatMap(r => r.pendingIds);
   const blocked = rows.filter(r => r.pendingIds.length || r.openCount || r.flaggedCount);
@@ -120,11 +142,14 @@ export default function MonthReport({ profile }) {
     <div className="h-full flex flex-col">
       <div className="px-4 lg:px-6 py-4 border-b border-bdr flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-1">
-          <button onClick={() => setAnchor(a => new Date(a.getFullYear(), a.getMonth() - 1, 1))} className="btn-ghost p-2 rounded-xl"><ChevronLeft size={16} /></button>
-          <button onClick={() => { const d = new Date(); d.setDate(1); setAnchor(d); }} className="px-3 py-1.5 rounded-xl text-sm btn-ghost">This month</button>
-          <button onClick={() => setAnchor(a => new Date(a.getFullYear(), a.getMonth() + 1, 1))} className="btn-ghost p-2 rounded-xl"><ChevronRight size={16} /></button>
+          <button onClick={() => setAnchor(new Date(start.getFullYear(), start.getMonth() - 1, start.getDate()))} className="btn-ghost p-2 rounded-xl"><ChevronLeft size={16} /></button>
+          <button onClick={() => setAnchor(new Date())} className="px-3 py-1.5 rounded-xl text-sm btn-ghost">This period</button>
+          <button onClick={() => setAnchor(new Date(start.getFullYear(), start.getMonth() + 1, start.getDate()))} className="btn-ghost p-2 rounded-xl"><ChevronRight size={16} /></button>
         </div>
-        <div className="text-sm font-bold text-paper">{monthName(anchor)}</div>
+        <div>
+          <div className="text-sm font-bold text-paper">{periodLabel(start, end, startDay || 1)}</div>
+          {startDay > 1 && <div className="text-[10px] text-dim">pay period, {startDay}{['th','st','nd','rd'][(startDay % 10 > 3 || (startDay > 10 && startDay < 14)) ? 0 : startDay % 10]} to the {startDay - 1}{['th','st','nd','rd'][((startDay - 1) % 10 > 3 || (startDay - 1 > 10 && startDay - 1 < 14)) ? 0 : (startDay - 1) % 10]}</div>}
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={exportCsv} className="px-3 py-1.5 rounded-xl btn-ghost text-sm flex items-center gap-1.5"><Download size={15} /> Export</button>
           {allPending.length > 0 && (
@@ -239,7 +264,8 @@ export default function MonthReport({ profile }) {
 
           <div className="text-[11px] text-dim">
             Hours come from the clock, not the rota. The decimal column (7.50 rather than 7h 30m) is the one
-            payroll usually wants. Holiday and sick count working days only.
+            payroll usually wants. Holiday and sick count working days only, clipped to this period.
+            {startDay > 1 && ' The period runs to your pay dates, not the calendar month.'}
             <span className="text-muted"> This reports hours, not pay — there are no pay rates in this system.</span>
           </div>
         </div>
