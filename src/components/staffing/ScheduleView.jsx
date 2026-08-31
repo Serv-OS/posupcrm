@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { ChevronLeft, ChevronRight, Users, LayoutGrid, Send, Plus, Trash2, X, Copy } from 'lucide-react';
 import { isoDate, mondayOf, weekDays, DOW_SHORT, fmtRange, shiftHours, timeOffOnDate, isAssignable } from '../../lib/staffing';
+import ClockCard from './ClockCard.jsx';
 
 // Default times for a brand-new shift (operators can change per shift).
 const DEFAULT_SHIFT = { start: '08:30', finish: '16:30' };
@@ -88,6 +89,10 @@ export default function ScheduleView({ profile }) {
 
   return (
     <div className="h-full flex flex-col">
+      <div className="px-4 lg:px-6 pt-4">
+        <ClockCard profile={profile} />
+      </div>
+
       {/* Toolbar */}
       <div className="px-6 py-4 border-b border-bdr flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-1">
