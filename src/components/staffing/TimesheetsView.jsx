@@ -12,7 +12,19 @@ import { isoDate, mondayOf, weekDays, DOW_SHORT, fmtRange, shiftHours } from '..
 // trigger freezes approved_by/at for non-managers), so this screen is the
 // only way hours become final.
 
-const HHMM = (ts) => ts ? new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—';
+// Always render a punch in the timezone of the person who made it. Showing a
+// California punch on a London clock is what made "+481m late" look like a bug
+// rather than a timezone.
+const HHMM = (ts, tz) => ts ? new Date(ts).toLocaleTimeString('en-GB',
+  { hour: '2-digit', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) }) : '—';
+// 'YYYY-MM-DD HH:MM' in that person's zone — the format punch_edit expects.
+const localInput = (ts, tz) => {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const opt = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, ...(tz ? { timeZone: tz } : {}) };
+  const parts = new Intl.DateTimeFormat('en-CA', opt).formatToParts(d).reduce((a, x) => (a[x.type] = x.value, a), {});
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+};
 const asHrs = (m) => m == null ? '—' : `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).padStart(2, '0')}m`;
 // Positive = late in / late out. Small drifts aren't worth colouring.
 const varLabel = (m) => m == null || Math.abs(m) < 5 ? null : `${m > 0 ? '+' : ''}${Math.round(m)}m`;
@@ -35,7 +47,10 @@ export default function TimesheetsView({ profile }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(null);
 
-  const canApprove = profile.role === 'owner' || profile.role === 'editor';
+  // Hours are not customer records. Only the owner sees the team's timesheets;
+  // the database enforces it too, so hiding the screen is not the whole fence.
+  const canApprove = profile.role === 'owner';
+  const [edit, setEdit] = useState(null);   // { punch, tz, name }
   const days = weekDays(monday);
   const weekStart = isoDate(days[0]);
   const weekEnd = isoDate(days[6]);
@@ -43,7 +58,7 @@ export default function TimesheetsView({ profile }) {
   const load = useCallback(async () => {
     setLoading(true);
     const [p, pu, sh, off] = await Promise.all([
-      supabase.from('profiles').select('id, display_name, email, default_weekly_hours').order('display_name'),
+      supabase.from('profiles').select('id, display_name, email, default_weekly_hours, timezone').order('display_name'),
       supabase.from('shift_punches').select('*').gte('business_date', weekStart).lte('business_date', weekEnd),
       supabase.from('shifts').select('*').gte('date', weekStart).lte('date', weekEnd),
       supabase.from('time_off').select('*').eq('status', 'approved').lte('start_date', weekEnd).gte('end_date', weekStart),
@@ -74,7 +89,23 @@ export default function TimesheetsView({ profile }) {
     .sort((a, b) => a.start_time.localeCompare(b.start_time));
   const offFor = (uid, d) => timeOff.find(x => x.user_id === uid && x.start_date <= d && x.end_date >= d);
 
+  if (profile.role !== 'owner') {
+    return <div className="p-8 text-muted text-sm">Only the owner can see the team's timesheets. Your own hours are on the Schedule screen.</div>;
+  }
   if (loading) return <div className="p-8 text-dim text-sm">Loading timesheets…</div>;
+
+  const saveEdit = async () => {
+    const { punch } = edit;
+    setBusy(punch.id);
+    const { error } = await supabase.rpc('punch_edit', {
+      p_id: punch.id,
+      p_in_local: edit.inStr,
+      p_out_local: edit.outStr || null,
+      p_reason: edit.reason || null,
+    });
+    if (error) alert(error.message.replace(/^.*?:\s*/, ''));
+    setEdit(null); setBusy(null); await load();
+  };
 
   // Only people who were scheduled or clocked this week.
   const rows = staff.filter(p =>
@@ -124,6 +155,11 @@ export default function TimesheetsView({ profile }) {
                     {(p.display_name || p.email || '?')[0].toUpperCase()}
                   </div>
                   <div className="font-semibold text-paper text-sm">{p.display_name || p.email}</div>
+                  {p.timezone && (
+                    <span className="text-[10px] text-muted" title="Their shift times mean this zone">
+                      {p.timezone.split('/').pop().replace(/_/g, ' ')} time
+                    </span>
+                  )}
                   {needsEye && (
                     <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg bg-red-100 text-red-700">
                       <AlertTriangle size={11} /> Needs checking
@@ -184,7 +220,7 @@ export default function TimesheetsView({ profile }) {
                             const vOut = varLabel(x.variance_finish_mins);
                             return (
                               <div key={x.id} className="flex items-center gap-2 flex-wrap text-xs">
-                                <span className="tabular-nums text-paper">{HHMM(x.clock_in)} → {x.clock_out ? HHMM(x.clock_out) : '…'}</span>
+                                <span className="tabular-nums text-paper">{HHMM(x.clock_in, p.timezone)} → {x.clock_out ? HHMM(x.clock_out, p.timezone) : '…'}</span>
                                 {x.break_mins > 0 && <span className="text-muted">({x.break_mins}m break)</span>}
                                 <span className="font-semibold text-paper tabular-nums">{asHrs(x.worked_minutes)}</span>
                                 {vIn && <span className="text-[10px] text-amber-700" title="vs rota start">in {vIn}</span>}
@@ -199,6 +235,12 @@ export default function TimesheetsView({ profile }) {
                                   <button onClick={() => unapprove([x.id], x.id)} disabled={busy === x.id}
                                     className="text-[11px] text-muted hover:text-paper disabled:opacity-50">Undo</button>
                                 )}
+                                {canApprove && (
+                                  <button onClick={() => setEdit({ punch: x, tz: p.timezone, name: p.display_name || p.email,
+                                    inStr: localInput(x.clock_in, p.timezone), outStr: localInput(x.clock_out, p.timezone), reason: '' })}
+                                    className="text-[11px] text-muted hover:text-paper">Edit</button>
+                                )}
+                                {x.edited_at && <span className="text-[10px] text-dim" title={x.edit_reason || ''}>edited</span>}
                               </div>
                             );
                           })}
@@ -211,6 +253,47 @@ export default function TimesheetsView({ profile }) {
             );
           })}
         </div>
+
+        {/* Correcting a punch. Times are typed in THAT PERSON'S zone; the
+            conversion happens server-side where the zone is known. */}
+        {edit && (
+          <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4"
+            onClick={e => e.target === e.currentTarget && setEdit(null)}>
+            <div style={{ background: 'var(--card)' }} className="w-full max-w-md rounded-2xl border border-bdr shadow-2xl p-5 space-y-3">
+              <div>
+                <div className="text-sm font-bold text-paper">Correct {edit.name}&rsquo;s hours</div>
+                <div className="text-[11px] text-muted">
+                  Times in {edit.tz ? edit.tz.split('/').pop().replace(/_/g, ' ') : 'company'} time, as YYYY-MM-DD HH:MM
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-mono uppercase tracking-wider text-dim block mb-1">Clocked in</label>
+                <input value={edit.inStr} onChange={e => setEdit(v => ({ ...v, inStr: e.target.value }))}
+                  className="w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper font-mono" />
+              </div>
+              <div>
+                <label className="text-[10px] font-mono uppercase tracking-wider text-dim block mb-1">Clocked out <span className="text-dim normal-case font-sans">(blank leaves it running)</span></label>
+                <input value={edit.outStr} onChange={e => setEdit(v => ({ ...v, outStr: e.target.value }))}
+                  placeholder="leave blank if still on shift"
+                  className="w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper font-mono" />
+              </div>
+              <div>
+                <label className="text-[10px] font-mono uppercase tracking-wider text-dim block mb-1">Why</label>
+                <input value={edit.reason} onChange={e => setEdit(v => ({ ...v, reason: e.target.value }))}
+                  placeholder="e.g. forgot to clock out, finished 17:30"
+                  className="w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper" />
+              </div>
+              <div className="text-[11px] text-dim">
+                The change is recorded against your name, and the entry goes back to needing approval.
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <button onClick={() => setEdit(null)} className="px-3 py-2 rounded-xl text-sm text-muted hover:text-paper">Cancel</button>
+                <button onClick={saveEdit} disabled={busy === edit.punch.id}
+                  className="px-4 py-2 rounded-xl bg-ember text-ink text-sm font-semibold hover:bg-ember-deep disabled:opacity-50">Save</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mt-4 text-[11px] text-dim max-w-5xl">
           Hours come from the clock, not the rota. <span className="text-muted">Auto-closed</span> means someone
