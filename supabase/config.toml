@@ -39,6 +39,12 @@ verify_jwt = false
 # the website chatbot, the mailbox pollers and the webhooks.
 [functions.admin-set-password]
 verify_jwt = false
+# Owner-gated, but the gate is INSIDE the function (it verifies the caller's
+# JWT and requires role=owner — strictly stronger than the gateway's "any
+# valid JWT"). Left on the gateway's check it answered the browser with a
+# bare 401 and the Activity tab showed "Load failed".
+[functions.team-activity]
+verify_jwt = false
 [functions.bank-sync]
 verify_jwt = false
 [functions.chat]
