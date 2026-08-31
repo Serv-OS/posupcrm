@@ -219,7 +219,16 @@ function StaffRow({ p, days, todayIso, shiftsFor, areaById, timeOff, canWrite, s
         </div>
         <div className="min-w-0">
           <div className="text-sm text-paper truncate">{p.display_name || p.email?.split('@')[0]}</div>
-          <div className="text-[10px] text-dim">{weekHours}h / {target}h</div>
+          {/* Readable while you build: green on target, amber under, red over. */}
+          <div className="text-[11px] font-semibold tabular-nums"
+            style={{ color: !target ? 'var(--c-dim)' : weekHours > target ? '#dc2626' : weekHours < target ? '#b45309' : '#059669' }}>
+            {Math.round(weekHours * 10) / 10}h{target ? ` / ${target}h` : ''}
+            {target ? (
+              <span className="font-normal text-dim">
+                {weekHours === target ? ' ✓' : ` (${weekHours > target ? '+' : ''}${Math.round((weekHours - target) * 10) / 10})`}
+              </span>
+            ) : null}
+          </div>
         </div>
       </div>
       {days.map((d, i) => {
@@ -252,6 +261,11 @@ function StaffRow({ p, days, todayIso, shiftsFor, areaById, timeOff, canWrite, s
                     </div>
                   );
                 })}
+                {cellShifts.length > 0 && (
+                  <div className="text-[10px] text-dim text-right tabular-nums pr-0.5">
+                    {Math.round(cellShifts.reduce((t, sh) => t + shiftHours(sh.start_time, sh.finish_time), 0) * 10) / 10}h
+                  </div>
+                )}
                 {canWrite && cellShifts.length === 0 && (
                   <button onClick={() => setEditShift({ user_id: p.id, date: iso, start_time: DEFAULT_SHIFT.start, finish_time: DEFAULT_SHIFT.finish, area_id: '' })}
                     className="opacity-0 group-hover:opacity-100 transition w-full h-full min-h-[40px] rounded-lg border-2 border-dashed border-bdr text-dim hover:border-ember hover:text-ember flex items-center justify-center">

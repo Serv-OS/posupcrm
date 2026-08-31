@@ -67,7 +67,11 @@ export default function TimesheetsView({ profile }) {
     setStatus(ids, { status: 'complete', approved_by: null, approved_at: null }, key);
 
   const punchesFor = (uid, d) => punches.filter(x => x.user_id === uid && x.business_date === d && x.status !== 'voided');
-  const shiftFor = (uid, d) => shifts.find(x => x.user_id === uid && x.date === d);
+  // A person can have SEVERAL shifts in a day (split shifts — 12:00-16:30 then
+  // 16:30-20:00). Using .find() here showed only the first and silently
+  // undercounted the week's scheduled hours.
+  const shiftsForDay = (uid, d) => shifts.filter(x => x.user_id === uid && x.date === d)
+    .sort((a, b) => a.start_time.localeCompare(b.start_time));
   const offFor = (uid, d) => timeOff.find(x => x.user_id === uid && x.start_date <= d && x.end_date >= d);
 
   if (loading) return <div className="p-8 text-dim text-sm">Loading timesheets…</div>;
@@ -107,10 +111,9 @@ export default function TimesheetsView({ profile }) {
           {rows.map(p => {
             const mine = punches.filter(x => x.user_id === p.id && x.status !== 'voided');
             const worked = mine.reduce((s, x) => s + (x.worked_minutes || 0), 0);
-            const scheduled = days.reduce((s, d) => {
-              const sh = shiftFor(p.id, isoDate(d));
-              return s + (sh ? shiftHours(sh.start_time, sh.finish_time) * 60 : 0);
-            }, 0);
+            const scheduled = days.reduce((s, d) =>
+              s + shiftsForDay(p.id, isoDate(d))
+                .reduce((t, sh) => t + shiftHours(sh.start_time, sh.finish_time) * 60, 0), 0);
             const pending = mine.filter(x => x.status === 'complete').map(x => x.id);
             const needsEye = mine.some(x => x.status === 'auto_closed' || x.status === 'disputed');
 
@@ -142,14 +145,22 @@ export default function TimesheetsView({ profile }) {
                   {days.map((d, i) => {
                     const iso = isoDate(d);
                     const dayPunches = punchesFor(p.id, iso);
-                    const sh = shiftFor(p.id, iso);
+                    const daySh = shiftsForDay(p.id, iso);
                     const off = offFor(p.id, iso);
-                    if (!dayPunches.length && !sh && !off) return null;
+                    if (!dayPunches.length && !daySh.length && !off) return null;
+                    const schedMins = daySh.reduce((t, x) => t + shiftHours(x.start_time, x.finish_time) * 60, 0);
                     return (
                       <div key={iso} className="px-4 py-2.5 flex items-start gap-3 flex-wrap">
                         <div className="w-20 shrink-0">
                           <div className="text-xs font-semibold text-paper">{DOW_SHORT[i]} {d.getDate()}</div>
-                          <div className="text-[10px] text-dim">{sh ? `${sh.start_time}–${sh.finish_time}` : 'no shift'}</div>
+                          {daySh.length === 0
+                            ? <div className="text-[10px] text-dim">no shift</div>
+                            : daySh.map(x => (
+                                <div key={x.id} className="text-[10px] text-dim">{x.start_time}–{x.finish_time}</div>
+                              ))}
+                          {daySh.length > 1 && (
+                            <div className="text-[10px] text-muted font-semibold">{asHrs(schedMins)} split</div>
+                          )}
                         </div>
 
                         {/* Holiday and sick sit on the row so an empty day reads
@@ -162,7 +173,7 @@ export default function TimesheetsView({ profile }) {
                           </span>
                         )}
 
-                        {dayPunches.length === 0 && !off && sh && (
+                        {dayPunches.length === 0 && !off && daySh.length > 0 && (
                           <span className="text-[11px] text-red-600 font-medium">Never clocked in</span>
                         )}
 
