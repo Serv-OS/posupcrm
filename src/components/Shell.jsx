@@ -31,6 +31,7 @@ import ReportsPanel from './crm/ReportsPanel.jsx';
 import ScheduleView from './staffing/ScheduleView.jsx';
 import BookingsPanel from './crm/BookingsPanel.jsx';
 import TimeOffView from './staffing/TimeOffView.jsx';
+import TimesheetsView from './staffing/TimesheetsView.jsx';
 import StaffView from './staffing/StaffView.jsx';
 import DepartmentsView from './staffing/DepartmentsView.jsx';
 import GlobalSearch from './GlobalSearch.jsx';
@@ -359,6 +360,8 @@ export default function Shell({ session }) {
         return <BookingsPanel profile={profile} />;
       case 'schedule':
         return <ScheduleView profile={profile} />;
+      case 'timesheets':
+        return <TimesheetsView profile={profile} />;
       case 'timeoff':
         return <TimeOffView profile={profile} />;
       case 'staff':

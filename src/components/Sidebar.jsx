@@ -47,7 +47,7 @@ const COLLAPSIBLE = [
     ['modules', 'Modules', LayoutGrid], ['feature_requests', 'Feature Requests', Sparkles], ['releases', 'Releases', Flag],
   ] },
   { id: 'workforce', label: 'Workforce', items: [
-    ['time', 'Time Tracking', Clock], ['schedule', 'Schedule', Calendar], ['bookings', 'Booking Page', CalendarCheck], ['timeoff', 'Time Off', Plane],
+    ['time', 'Time Tracking', Clock], ['schedule', 'Schedule', Calendar], ['timesheets', 'Timesheets', ClipboardCheck], ['bookings', 'Booking Page', CalendarCheck], ['timeoff', 'Time Off', Plane],
     ['staff', 'Staff', User], ['departments', 'Departments & Areas', Building2],
   ] },
   { id: 'insights', label: 'Insights', items: [
