@@ -96,7 +96,7 @@ serve(async (req) => {
           last_run_at: new Date().toISOString(),
         }).eq("id", sched.id);
 
-        results.push({ schedule: sched.id, invoice: inv.invoice_number, sent, sendError });
+        results.push({ schedule: sched.id, invoice: inv.invoice_number });
       } catch (e) {
         results.push({ schedule: sched.id, error: (e as Error).message });
       }
