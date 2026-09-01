@@ -129,7 +129,7 @@ serve(async (req) => {
         try {
           const { data: lines } = await supabase.from("invoice_line_items").select("*").eq("invoice_id", inv.id).order("sort");
           const { data: seller } = await supabase.from("support_settings")
-            .select("business_name, business_email, business_phone, quote_accent, logo_url").eq("id", 1).maybeSingle();
+            .select("business_name, business_email, business_phone, quote_accent, logo_url, logo_pdf_data").eq("id", 1).maybeSingle();
           const appUrl = Deno.env.get("APP_URL") || "https://posupcrm.vercel.app";
           const { subject, html } = invoiceEmailHtml(inv, seller || {}, `${appUrl}/i/${inv.public_token}`);
           const [{ data: company }, { data: location }, { data: contact }] = await Promise.all([
@@ -140,7 +140,7 @@ serve(async (req) => {
           const pdfBytes = await buildInvoicePdfBytes({
             inv, lines: lines || [],
             totals: { subtotal: inv.subtotal, tax: inv.tax_amount, total: inv.total },
-            seller: { name: (seller as any)?.business_name, email: (seller as any)?.business_email, phone: (seller as any)?.business_phone, accent: (seller as any)?.quote_accent, logo_url: (seller as any)?.logo_url },
+            seller: { name: (seller as any)?.business_name, email: (seller as any)?.business_email, phone: (seller as any)?.business_phone, accent: (seller as any)?.quote_accent, logo_url: (seller as any)?.logo_url, logo_data: (seller as any)?.logo_pdf_data },
             billTo: {
               companyName: (company as any)?.name || "",
               contactName: contact ? [(contact as any).first_name, (contact as any).last_name].filter(Boolean).join(" ") : "",
