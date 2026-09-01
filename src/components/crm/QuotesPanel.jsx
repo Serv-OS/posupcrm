@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
-import { FileSignature, Plus, X } from 'lucide-react';
-import { money } from './InvoicesPanel.jsx';
+import { FileSignature, Plus, X, FileDown } from 'lucide-react';
+import { money, curOf } from './InvoicesPanel.jsx';
+import { useStickyState } from '../../lib/stickyState';
+import { downloadListPdf } from '../../lib/listPdf';
 
 const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '—';
 
@@ -24,10 +26,15 @@ export default function QuotesPanel({ profile, onNavigate }) {
   const [quotes, setQuotes] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [contacts, setContacts] = useState([]);
-  const [statusFilter, setStatusFilter] = useState('all');
+  // Working a status queue means opening a quote and coming back; the filter
+  // has to still be there when you do.
+  const [filters, setFilters] = useStickyState('quotes', { statusFilter: 'all' });
+  const { statusFilter } = filters;
+  const setStatusFilter = (v) => setFilters(p => ({ ...p, statusFilter: v }));
   const [creating, setCreating] = useState(false);
   const [newCompany, setNewCompany] = useState('');
   const [newContact, setNewContact] = useState('');
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
@@ -68,6 +75,39 @@ export default function QuotesPanel({ profile, onNavigate }) {
   const input = "px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper focus:outline-none focus:border-ember";
   const contactName = (q) => q.contact ? [q.contact.first_name, q.contact.last_name].filter(Boolean).join(' ') : '';
 
+  const exportPdf = async () => {
+    setPdfBusy(true);
+    try {
+      // Totals only mean something inside one currency, so a mixed list is
+      // printed without them rather than with an invented sum.
+      const curs = [...new Set(filtered.map(curOf))];
+      const foot = curs.length > 1
+        ? `Mixed currencies (${curs.join(', ')}) — not totalled.`
+        : `Totals (${curs[0] || 'GBP'}): one-off ${money(filtered.reduce((s, q) => s + Number(q.one_off_total || 0), 0), curs[0])}`
+          + ` · ARR ${money(filtered.reduce((s, q) => s + Number(q.recurring_arr || 0), 0), curs[0])}`;
+
+      await downloadListPdf({
+        title: 'Quotes',
+        columns: ['Quote', 'Customer', 'Created', 'Valid until', 'Status', 'Currency', 'One-off total', 'ARR'],
+        // `filtered` is the exact array the table maps over, so the PDF can
+        // never include a quote the current status filter is hiding.
+        rows: filtered.map(q => {
+          const cur = curOf(q);
+          const sub = q.location?.name || (q.company?.name ? contactName(q) : '');
+          return [
+            `Q-${q.quote_number}`,
+            [q.company?.name || contactName(q) || '—', sub].filter(Boolean).join(' · '),
+            fmtD(q.created_at), fmtD(q.valid_until), quoteStatus(q), cur,
+            money(q.one_off_total, cur),
+            Number(q.recurring_arr) ? money(q.recurring_arr, cur) : '—',
+          ];
+        }),
+        filters: statusFilter === 'all' ? [] : [`Status: ${statusFilter}`],
+        footNote: foot,
+      });
+    } finally { setPdfBusy(false); }
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="px-6 py-5 border-b border-bdr flex items-center justify-between flex-wrap gap-3">
@@ -78,11 +118,18 @@ export default function QuotesPanel({ profile, onNavigate }) {
             <div className="text-xs text-muted">Every quote, from draft to signed and paid</div>
           </div>
         </div>
-        {canWrite && (
-          <button onClick={() => setCreating(true)} className="btn-glass px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5">
-            <Plus size={15} /> New quote
+        <div className="flex items-center gap-2">
+          <button onClick={exportPdf} disabled={pdfBusy || !filtered.length}
+            title="Download the list you are looking at as a PDF"
+            className="btn-ghost px-3 py-2 rounded-xl text-sm flex items-center gap-1.5 disabled:opacity-50">
+            <FileDown size={14} /> {pdfBusy ? 'Preparing…' : 'PDF'}
           </button>
-        )}
+          {canWrite && (
+            <button onClick={() => setCreating(true)} className="btn-glass px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5">
+              <Plus size={15} /> New quote
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
@@ -163,8 +210,8 @@ export default function QuotesPanel({ profile, onNavigate }) {
                       </td>
                       <td className="px-4 py-3 text-muted hidden md:table-cell">{fmtD(q.created_at)}</td>
                       <td className="px-4 py-3 text-muted hidden md:table-cell">{fmtD(q.valid_until)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-paper">{money(q.one_off_total)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-muted hidden lg:table-cell">{Number(q.recurring_arr) ? money(q.recurring_arr) : '—'}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-paper">{money(q.one_off_total, curOf(q))}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-muted hidden lg:table-cell">{Number(q.recurring_arr) ? money(q.recurring_arr, curOf(q)) : '—'}</td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded ${QUOTE_BADGE[st] || 'bg-slate-100 text-slate-500'}`}>{st}</span>
                       </td>

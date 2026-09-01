@@ -1,9 +1,17 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Receipt, Plus, Repeat, X, Trash2 } from 'lucide-react';
+import { Receipt, Plus, Repeat, X, Trash2, FileDown } from 'lucide-react';
+import { useStickyState } from '../../lib/stickyState';
+import { downloadListPdf } from '../../lib/listPdf';
 
-export const money = (v) => `£${Number(v || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const SYMBOL = { GBP: '£', USD: '$', EUR: '€' };
+// The currency argument is optional: every existing `money(x)` call still reads
+// as sterling. A row that carries its own currency passes it, so a list can
+// never relabel a document's money as £ just because this CRM is the UK one.
+export const money = (v, currency) =>
+  `${SYMBOL[currency || 'GBP'] || `${currency} `}${Number(v || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtD = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '—';
+export const curOf = (x) => x?.currency || 'GBP';
 
 // Effective display status: sent/viewed past due = overdue
 export const invStatus = (inv) => {
@@ -15,19 +23,30 @@ export const INV_BADGE = {
   draft: 'bg-slate-200 text-slate-600', sent: 'bg-blue-100 text-blue-700', viewed: 'bg-indigo-100 text-indigo-700',
   paid: 'bg-emerald-100 text-emerald-700', overdue: 'bg-red-100 text-red-700', void: 'bg-slate-100 text-slate-400',
 };
+const FIELD_LABEL = { all: 'all fields', company: 'customer', location: 'location', number: 'invoice number', po: 'PO number' };
+
+// One printed figure across mixed currencies would be a fiction, so a total is
+// only offered when every row on the page shares a currency.
+const totalNote = (label, pairs) => {
+  const curs = [...new Set(pairs.map(p => p[0]))];
+  if (curs.length > 1) return `Mixed currencies (${curs.join(', ')}) — not totalled.`;
+  return `${label} (${curs[0] || 'GBP'}): ${money(pairs.reduce((s, p) => s + p[1], 0), curs[0])}`;
+};
 
 export default function InvoicesPanel({ profile, onNavigate }) {
-  const [tab, setTab] = useState('invoices');
   const [invoices, setInvoices] = useState([]);
   const [schedules, setSchedules] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [locations, setLocations] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [products, setProducts] = useState([]);
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [search, setSearch] = useState('');
-  const [searchField, setSearchField] = useState('all');
+  // Chasing payment means opening an invoice and coming back over and over, so
+  // which tab, filter and search you were on survives the round trip.
+  const [filters, setFilters] = useStickyState('invoices', { tab: 'invoices', statusFilter: 'all', search: '', searchField: 'all' });
+  const { tab, statusFilter, search, searchField } = filters;
+  const setFilter = (k, v) => setFilters(p => ({ ...p, [k]: v }));
   const [editSched, setEditSched] = useState(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
@@ -88,6 +107,45 @@ export default function InvoicesPanel({ profile, onNavigate }) {
   };
   const filtered = invoices.filter(i => matchesTab(i) && matchesSearch(i));
 
+  // What a schedule bills each run. Shared with the row below so the printed
+  // list and the screen can never quietly disagree about the number.
+  const schedAmount = (s) => (Array.isArray(s.lines) ? s.lines : [])
+    .reduce((sum, l) => sum + (Number(l.qty) || 1) * (Number(l.unit_price) || 0), 0) * (1 + Number(s.tax_rate || 0) / 100);
+
+  const exportPdf = async () => {
+    setPdfBusy(true);
+    try {
+      if (tab === 'invoices') {
+        const active = [];
+        if (statusFilter !== 'all') active.push(`Status: ${statusFilter === 'sent' ? 'sent or viewed' : statusFilter}`);
+        if (q) active.push(`Search: "${search.trim()}" in ${FIELD_LABEL[searchField]}`);
+        await downloadListPdf({
+          title: 'Invoices',
+          columns: ['Invoice', 'Customer', 'Issued', 'Due', 'Status', 'Currency', 'Total'],
+          // `filtered` is the exact array the list maps over, so the PDF can
+          // never include an invoice the current filter is hiding.
+          rows: filtered.map(inv => [
+            `INV-${inv.invoice_number}`, custName(inv), fmtD(inv.issue_date), fmtD(inv.due_date),
+            invStatus(inv), curOf(inv), money(inv.total, curOf(inv)),
+          ]),
+          filters: active,
+          footNote: totalNote('Total', filtered.map(inv => [curOf(inv), Number(inv.total || 0)])),
+        });
+      } else {
+        await downloadListPdf({
+          title: 'Recurring invoice schedules',
+          columns: ['Schedule', 'Customer', 'Frequency', 'Day', 'Next run', 'Sending', 'State', 'Currency', 'Amount'],
+          rows: schedules.map(s => [
+            s.label || custName(s), custName(s), s.frequency, s.day_of_month, fmtD(s.next_run),
+            s.auto_send ? 'Auto-send' : 'Draft only', s.active ? 'Active' : 'Paused',
+            curOf(s), money(schedAmount(s), curOf(s)),
+          ]),
+          footNote: totalNote('Per run', schedules.map(s => [curOf(s), schedAmount(s)])),
+        });
+      }
+    } finally { setPdfBusy(false); }
+  };
+
   const input = "px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper focus:outline-none focus:border-ember";
 
   return (
@@ -102,9 +160,14 @@ export default function InvoicesPanel({ profile, onNavigate }) {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-0.5 bg-card rounded-xl p-0.5">
-            <button onClick={() => setTab('invoices')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${tab === 'invoices' ? 'bg-ember text-white' : 'text-muted'}`}>Invoices</button>
-            <button onClick={() => setTab('recurring')} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold ${tab === 'recurring' ? 'bg-ember text-white' : 'text-muted'}`}><Repeat size={12} /> Recurring</button>
+            <button onClick={() => setFilter('tab', 'invoices')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${tab === 'invoices' ? 'bg-ember text-white' : 'text-muted'}`}>Invoices</button>
+            <button onClick={() => setFilter('tab', 'recurring')} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold ${tab === 'recurring' ? 'bg-ember text-white' : 'text-muted'}`}><Repeat size={12} /> Recurring</button>
           </div>
+          <button onClick={exportPdf} disabled={pdfBusy || !(tab === 'invoices' ? filtered.length : schedules.length)}
+            title="Download the list you are looking at as a PDF"
+            className="btn-ghost px-3 py-2 rounded-xl text-sm flex items-center gap-1.5 disabled:opacity-50">
+            <FileDown size={14} /> {pdfBusy ? 'Preparing…' : 'PDF'}
+          </button>
           {canWrite && (tab === 'invoices'
             ? <button onClick={newInvoice} className="btn-glass px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5"><Plus size={15} /> New invoice</button>
             : <button onClick={() => setEditSched({})} className="btn-glass px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5"><Plus size={15} /> New schedule</button>)}
@@ -129,22 +192,22 @@ export default function InvoicesPanel({ profile, onNavigate }) {
                   <span className="text-xs text-dim font-mono">({filtered.length})</span>
                   <div className="ml-auto flex items-center gap-1 flex-wrap">
                     {[['all', 'All'], ['draft', 'Draft'], ['sent', 'Sent'], ['overdue', 'Overdue'], ['paid', 'Paid']].map(([k, lbl]) => (
-                      <button key={k} onClick={() => setStatusFilter(k)}
+                      <button key={k} onClick={() => setFilter('statusFilter', k)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${statusFilter === k ? 'bg-ember text-white' : 'text-muted hover:text-paper'}`}>{lbl}</button>
                     ))}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <select className={input + ' !py-1.5 text-xs shrink-0'} value={searchField} onChange={e => setSearchField(e.target.value)}>
+                  <select className={input + ' !py-1.5 text-xs shrink-0'} value={searchField} onChange={e => setFilter('searchField', e.target.value)}>
                     <option value="all">All fields</option>
                     <option value="company">Customer</option>
                     <option value="location">Location</option>
                     <option value="number">Invoice #</option>
                     <option value="po">PO number</option>
                   </select>
-                  <input className={input + ' !py-1.5 text-xs flex-1'} value={search} onChange={e => setSearch(e.target.value)}
+                  <input className={input + ' !py-1.5 text-xs flex-1'} value={search} onChange={e => setFilter('search', e.target.value)}
                     placeholder="Search invoices…" />
-                  {search && <button onClick={() => setSearch('')} className="text-xs text-dim hover:text-paper px-2 shrink-0">Clear</button>}
+                  {search && <button onClick={() => setFilter('search', '')} className="text-xs text-dim hover:text-paper px-2 shrink-0">Clear</button>}
                 </div>
               </div>
               <div className="divide-y divide-bdr">
@@ -163,7 +226,7 @@ export default function InvoicesPanel({ profile, onNavigate }) {
                           {inv.recurring_id && <div className="text-[10px] text-uv flex items-center gap-1"><Repeat size={10} /> recurring</div>}
                         </div>
                         <div className="text-xs text-muted shrink-0 w-24 text-right">Due {fmtD(inv.due_date)}</div>
-                        <div className="text-sm font-semibold text-paper tabular-nums shrink-0 w-24 text-right">{money(inv.total)}</div>
+                        <div className="text-sm font-semibold text-paper tabular-nums shrink-0 w-24 text-right">{money(inv.total, curOf(inv))}</div>
                         <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg shrink-0 w-20 text-center ${INV_BADGE[st]}`}>{st}</span>
                       </div>
                     );
@@ -179,7 +242,7 @@ export default function InvoicesPanel({ profile, onNavigate }) {
               <div className="divide-y divide-bdr">
                 {schedules.length === 0 ? <div className="p-8 text-center text-dim text-sm italic">No recurring invoices yet.</div>
                   : schedules.map(s => {
-                    const amount = (Array.isArray(s.lines) ? s.lines : []).reduce((sum, l) => sum + (Number(l.qty) || 1) * (Number(l.unit_price) || 0), 0) * (1 + Number(s.tax_rate || 0) / 100);
+                    const amount = schedAmount(s);
                     return (
                       <div key={s.id} onClick={() => canWrite && setEditSched(s)}
                         className="px-5 py-3 flex items-center gap-4 hover:bg-card/50 cursor-pointer">
@@ -189,7 +252,7 @@ export default function InvoicesPanel({ profile, onNavigate }) {
                           <div className="text-[11px] text-muted">{custName(s)} · {s.frequency} on day {s.day_of_month}{s.auto_send ? ' · auto-send' : ' · draft only'}</div>
                         </div>
                         <div className="text-xs text-muted shrink-0">Next: {fmtD(s.next_run)}</div>
-                        <div className="text-sm font-semibold text-paper tabular-nums shrink-0 w-24 text-right">{money(amount)}</div>
+                        <div className="text-sm font-semibold text-paper tabular-nums shrink-0 w-24 text-right">{money(amount, curOf(s))}</div>
                       </div>
                     );
                   })}
