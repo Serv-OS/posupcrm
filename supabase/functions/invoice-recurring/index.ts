@@ -137,7 +137,9 @@ serve(async (req) => {
             inv.location_id ? supabase.from("locations").select("name").eq("id", inv.location_id).maybeSingle() : Promise.resolve({ data: null }),
             inv.contact_id ? supabase.from("contacts").select("first_name, last_name").eq("id", inv.contact_id).maybeSingle() : Promise.resolve({ data: null }),
           ]);
-          const pdfBytes = await buildInvoicePdfBytes({
+          let pdfBytes: Uint8Array | null = null;
+          try {
+            pdfBytes = await buildInvoicePdfBytes({
             inv, lines: lines || [],
             totals: { subtotal: inv.subtotal, tax: inv.tax_amount, total: inv.total },
             seller: { name: (seller as any)?.business_name, email: (seller as any)?.business_email, phone: (seller as any)?.business_phone, accent: (seller as any)?.quote_accent, logo_url: (seller as any)?.logo_url, logo_data: (seller as any)?.logo_pdf_data },
@@ -146,9 +148,17 @@ serve(async (req) => {
               contactName: contact ? [(contact as any).first_name, (contact as any).last_name].filter(Boolean).join(" ") : "",
               contactEmail: recipient, locationName: (location as any)?.name || "",
             },
-            fmt: money, taxLabel: "VAT", dateLocale: "en-GB",
-          });
-          await sendInvoiceEmail(supabase, recipient, subject, html, { filename: `INV-${inv.invoice_number}.pdf`, bytes: pdfBytes });
+              fmt: money, taxLabel: "VAT", dateLocale: "en-GB",
+            });
+          } catch (pdfErr) {
+            console.error(`invoice-recurring: PDF failed for INV-${inv.invoice_number}, sending without it:`, (pdfErr as Error).message);
+          }
+          // The attachment is a convenience; the INVOICE is the point. If the
+          // PDF fails or is too expensive to build, send the email anyway —
+          // it carries a link to the payable invoice page. Getting billed late
+          // because a logo would not encode is not an acceptable trade.
+          await sendInvoiceEmail(supabase, recipient, subject, html,
+            pdfBytes ? { filename: `INV-${inv.invoice_number}.pdf`, bytes: pdfBytes } : undefined);
           await supabase.from("invoices").update({ status: "sent", sent_at: new Date().toISOString(), email_to: recipient }).eq("id", inv.id);
           sends.push({ invoice: inv.invoice_number, to: recipient, sent: true });
         } catch (e) {
@@ -160,7 +170,51 @@ serve(async (req) => {
       sends.push({ error: (e as Error).message });
     }
 
-    return json({ generated: results.length, results, sent: sends.length, sends });
+    // ── Health check: billing must never fail quietly ──────────────────────
+    // This job broke in August and nobody noticed for a month, because a
+    // half-finished run still returns 200. Anything overdue now raises a
+    // notification for the owners, deduplicated to one a day so it is a signal
+    // rather than noise.
+    const alerts: string[] = [];
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: overdue } = await supabase.from("recurring_invoices")
+        .select("id").eq("active", true).lt("next_run", today);
+      if (overdue?.length) alerts.push(`${overdue.length} recurring schedule(s) are past their run date and have not generated`);
+
+      // A draft that has sat for hours means sending is stuck, not busy.
+      const sixHoursAgo = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
+      const { data: stuck } = await supabase.from("invoices")
+        .select("invoice_number, recurring:recurring_invoices!inner(auto_send)")
+        .eq("status", "draft").not("recurring_id", "is", null).is("sent_at", null)
+        .lt("created_at", sixHoursAgo);
+      const reallyStuck = (stuck || []).filter((x: any) => x.recurring?.auto_send);
+      if (reallyStuck.length) {
+        alerts.push(`${reallyStuck.length} auto-send invoice(s) have been unsent for over 6 hours: ` +
+          reallyStuck.slice(0, 8).map((x: any) => `INV-${x.invoice_number}`).join(", "));
+      }
+
+      if (alerts.length) {
+        const { data: owners } = await supabase.from("profiles").select("id").eq("role", "owner");
+        const since = new Date(Date.now() - 20 * 3600 * 1000).toISOString();
+        for (const o of owners || []) {
+          const { data: already } = await supabase.from("notifications")
+            .select("id").eq("recipient_id", o.id).eq("type", "billing_stuck")
+            .gt("created_at", since).limit(1);
+          if (already?.length) continue;      // one a day, not one every 15 minutes
+          await supabase.from("notifications").insert({
+            recipient_id: o.id, type: "billing_stuck",
+            title: "Recurring invoicing needs attention",
+            body: alerts.join(". ") + ".",
+            entity_type: "invoice",
+          });
+        }
+      }
+    } catch (e) {
+      console.error("invoice-recurring: health check failed:", (e as Error).message);
+    }
+
+    return json({ generated: results.length, results, sent: sends.length, sends, alerts });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }

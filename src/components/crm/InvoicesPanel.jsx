@@ -42,8 +42,14 @@ export default function InvoicesPanel({ profile, onNavigate }) {
   const [products, setProducts] = useState([]);
   // Chasing payment means opening an invoice and coming back over and over, so
   // which tab, filter and search you were on survives the round trip.
-  const [filters, setFilters] = useStickyState('invoices', { tab: 'invoices', statusFilter: 'all', search: '', searchField: 'all' });
+  const [filters, setFilters] = useStickyState('invoices', {
+    tab: 'invoices', statusFilter: 'all', search: '', searchField: 'all',
+    // Per-column filters. Sticky too, so a chase filtered to one customer
+    // survives opening each invoice in turn.
+    cols: { num: '', company: '', location: '', dueFrom: '', dueTo: '', min: '', max: '' },
+  });
   const { tab, statusFilter, search, searchField } = filters;
+  const cols = filters.cols || { num: '', company: '', location: '', dueFrom: '', dueTo: '', min: '', max: '' };
   const setFilter = (k, v) => setFilters(p => ({ ...p, [k]: v }));
   const [editSched, setEditSched] = useState(null);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -147,6 +153,20 @@ export default function InvoicesPanel({ profile, onNavigate }) {
     if (statusFilter === 'sent') return st === 'sent' || st === 'viewed';
     return st === statusFilter; // draft, overdue, paid
   };
+  // Every column filters independently and they AND together — the old single
+  // search box could only ever ask about one field at a time.
+  const colMatch = (inv) => {
+    const c = cols;
+    if (c.num && !`inv-${inv.invoice_number}`.toLowerCase().includes(c.num.toLowerCase().replace(/^inv-?/, 'inv-'))
+        && !String(inv.invoice_number).includes(c.num.replace(/\D/g, ''))) return false;
+    if (c.company && !(inv.company?.name || '').toLowerCase().includes(c.company.toLowerCase())) return false;
+    if (c.location && !(inv.location?.name || '').toLowerCase().includes(c.location.toLowerCase())) return false;
+    if (c.dueFrom && (!inv.due_date || inv.due_date < c.dueFrom)) return false;
+    if (c.dueTo && (!inv.due_date || inv.due_date > c.dueTo)) return false;
+    if (c.min && !(Number(inv.total) >= Number(c.min))) return false;
+    if (c.max && !(Number(inv.total) <= Number(c.max))) return false;
+    return true;
+  };
   const q = search.trim().toLowerCase();
   const matchesSearch = (inv) => {
     if (!q) return true;
@@ -161,7 +181,7 @@ export default function InvoicesPanel({ profile, onNavigate }) {
     if (searchField === 'po') return po.includes(q);
     return comp.includes(q) || loc.includes(q) || num.includes(q) || label.includes(q) || po.includes(q);
   };
-  const filtered = invoices.filter(i => matchesTab(i) && matchesSearch(i));
+  const filtered = invoices.filter(i => matchesTab(i) && matchesSearch(i) && colMatch(i));
 
   // What a schedule bills each run. Shared with the row below so the printed
   // list and the screen can never quietly disagree about the number.
@@ -203,6 +223,11 @@ export default function InvoicesPanel({ profile, onNavigate }) {
   };
 
   const input = "px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper focus:outline-none focus:border-ember";
+  // One definition for header, filters and rows so the columns cannot drift.
+  const GRID = 'grid items-center gap-3 px-5 grid-cols-[90px_minmax(0,1.4fr)_minmax(0,1.4fr)_110px_110px_84px_32px]';
+  const colInput = 'w-full px-2 py-1 bg-card border border-bdr rounded-lg text-[11px] text-paper placeholder-dim focus:outline-none focus:border-ember';
+  const setCol = (k, v) => setFilter('cols', { ...cols, [k]: v });
+  const colsActive = Object.values(cols).some(Boolean);
 
   return (
     <div className="h-full flex flex-col">
@@ -271,30 +296,26 @@ export default function InvoicesPanel({ profile, onNavigate }) {
                   : filtered.length === 0 ? <div className="p-8 text-center text-dim text-sm italic">No invoices yet — raise your first one.</div>
                   : filtered.map(inv => {
                     const st = invStatus(inv);
+                    const { company, site } = partiesOf(inv);
                     return (
                       <div key={inv.id} onClick={() => onNavigate?.('invoice', inv.id)}
-                        className="px-5 py-3 flex items-center gap-4 hover:bg-card/50 cursor-pointer">
-                        <div className="font-mono text-xs text-dim w-20 shrink-0">INV-{inv.invoice_number}</div>
-                        <div className="flex-1 min-w-0">
-                          {(() => {
-                            const { company, site } = partiesOf(inv);
-                            return (
-                              <>
-                                <div className="text-sm text-paper font-medium truncate">{company || site || inv.label || '—'}</div>
-                                {company && site && <div className="text-[11px] text-muted truncate">{site}</div>}
-                              </>
-                            );
-                          })()}
+                        className={`${GRID} py-3 hover:bg-card/50 cursor-pointer`}>
+                        <div className="font-mono text-xs text-dim">INV-{inv.invoice_number}</div>
+                        <div className="min-w-0">
+                          <div className="text-sm text-paper font-medium truncate">{company || inv.label || '—'}</div>
                           {inv.po_number && <div className="text-[10px] text-muted font-mono truncate">PO {inv.po_number}</div>}
-                          {inv.viewed_at && <div className="text-[10px] text-emerald-600">👁 Viewed {new Date(inv.viewed_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
                           {inv.recurring_id && <div className="text-[10px] text-uv flex items-center gap-1"><Repeat size={10} /> recurring</div>}
                         </div>
-                        <div className="text-xs text-muted shrink-0 w-24 text-right">Due {fmtD(inv.due_date)}</div>
-                        <div className="text-sm font-semibold text-paper tabular-nums shrink-0 w-24 text-right">{money(inv.total, curOf(inv))}</div>
-                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg shrink-0 w-20 text-center ${INV_BADGE[st]}`}>{st}</span>
+                        <div className="min-w-0">
+                          <div className="text-sm text-muted truncate">{site || '—'}</div>
+                          {inv.viewed_at && <div className="text-[10px] text-emerald-600 truncate">{'\u{1F441}'} Viewed {new Date(inv.viewed_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
+                        </div>
+                        <div className="text-xs text-muted text-right">Due {fmtD(inv.due_date)}</div>
+                        <div className="text-sm font-semibold text-paper tabular-nums text-right">{money(inv.total, curOf(inv))}</div>
+                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg text-center ${INV_BADGE[st]}`}>{st}</span>
                         <button onClick={(e) => downloadOne(inv, e)} disabled={pdfFor === inv.id}
                           title={`Download INV-${inv.invoice_number} as a PDF`}
-                          className="shrink-0 p-1.5 rounded-lg text-dim hover:text-ember hover:bg-ember/10 transition disabled:opacity-40">
+                          className="p-1.5 rounded-lg text-dim hover:text-ember hover:bg-ember/10 transition disabled:opacity-40">
                           <Download size={15} />
                         </button>
                       </div>
