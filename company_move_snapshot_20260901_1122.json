@@ -1,0 +1,401 @@
+{
+  "taken_at": "2026-09-01T18:22:15.440256+00:00",
+  "deals": [
+    {
+      "id": "5a4550eb-4f22-4caf-a74c-79a536198f0c",
+      "name": "LS Install - Butter Bird",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 1654.54,
+      "stage": "closed_won",
+      "location_id": "8576f8f9-40ec-4887-b034-271aed440fad",
+      "location": "Butter Bird",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "25b0bf43-8341-473a-85ae-0fbc6b58c374",
+      "name": "LS Install - So Famous - Ancoats",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 1120,
+      "stage": "closed_won",
+      "location_id": "5169b1eb-bc7d-4b39-803a-72133ec33f59",
+      "location": "So Famous - Beehive Lofts",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "95254c78-1b8f-4cc4-857f-3249b36acfd3",
+      "name": "LS Install - EL Kabron WG",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 800,
+      "stage": "closed_won",
+      "location_id": "29ab5085-6c62-4389-b80e-2b067eb890d2",
+      "location": "El Kabron WG",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "f87e4af3-a41d-4a9d-85bf-a396cde0c851",
+      "name": "LS Install - El Kabron",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 800,
+      "stage": "closed_won",
+      "location_id": "eccba682-af12-438e-aefb-b800e63109e0",
+      "location": "El Kabron",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "ea3c63b5-62bf-4e2b-8a6e-d4c0eb8149ec",
+      "name": "LS Install - La Bandera",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 800,
+      "stage": "closed_won",
+      "location_id": "ab830f33-e198-4eda-9a59-d86858ae1f9f",
+      "location": "La Bandera",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "b913124d-21ae-48ba-b9b9-f2f13000f89b",
+      "name": "LS Install - Burgundi",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 800,
+      "stage": "closed_won",
+      "location_id": "3803b56d-603f-4f36-8f07-641440c74925",
+      "location": "Burgundi",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "d56c37f7-d642-4718-80c8-221f868474e9",
+      "name": "LS Install - Thai Kitchen No 6",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 560,
+      "stage": "closed_won",
+      "location_id": "b551ba25-02f0-47ef-9f02-0d1c3a4a3e79",
+      "location": "Thai Kitchen No 6",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "ea0722d7-2c7d-4854-8cfc-82939ae45d8a",
+      "name": "LS Install - Crossing Bistro",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 1120,
+      "stage": "closed_won",
+      "location_id": "40a4c8da-c47a-46c2-86cb-2d7927944781",
+      "location": "Crossing Indian Bistro Leeds",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "57c8ae6a-8c39-41f7-b2ef-a5d3a53021b9",
+      "name": "LS Install - Rita Rays",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 840,
+      "stage": "closed_won",
+      "location_id": "fcf8c7c2-815e-4429-9385-d431e6c607b1",
+      "location": "Rita Rays",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "6fe80c9b-c9b3-4e7c-bc92-471b606b12b3",
+      "name": "LS Install - Orchin NW",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 840,
+      "stage": "closed_won",
+      "location_id": "ac09fe8d-f6ef-462b-8b4c-0df29e158154",
+      "location": "Orchid NW",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "b22183fd-073e-4af8-bc70-7119d308420d",
+      "name": "LS INstall - Butter Bird Traning",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 300,
+      "stage": "closed_won",
+      "location_id": "8576f8f9-40ec-4887-b034-271aed440fad",
+      "location": "Butter Bird",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "f61a5452-1f49-49f0-9db2-80ff84324e99",
+      "name": "LS Install - Evuna Knutsford",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 840,
+      "stage": "closed_won",
+      "location_id": "c291a349-837c-41a0-a928-92b66592acef",
+      "location": "Evuna - Knutsford",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "093cea23-0d18-449e-9668-f80744e82bfe",
+      "name": "LS Install - Evuna - Northern Quarter",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 1400,
+      "stage": "closed_won",
+      "location_id": "1431a2da-a11a-4164-9175-e9e1628975ff",
+      "location": "Evuna - Northern Quarter",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "458966d8-7c10-4442-89f0-a31ba300811b",
+      "name": "LS Install - Verde",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "value": 560,
+      "stage": "closed_won",
+      "location_id": "41225a25-4e19-408a-b41b-d3a33083dd4e",
+      "location": "Verde - Macclesfield",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    }
+  ],
+  "quotes": [
+    {
+      "id": "de9ec987-32c4-412c-80b3-2afe5a6cb390",
+      "quote_number": 1018,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 800,
+      "location_id": "3803b56d-603f-4f36-8f07-641440c74925",
+      "location": "Burgundi",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "156598f7-29a4-4e91-b050-27f7554bb36c",
+      "quote_number": 1012,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 1344,
+      "location_id": "5169b1eb-bc7d-4b39-803a-72133ec33f59",
+      "location": "So Famous - Beehive Lofts",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "af6a4ebb-b8c0-4c20-ae2c-b8a740a3c462",
+      "quote_number": 1005,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 1654.54,
+      "location_id": "8576f8f9-40ec-4887-b034-271aed440fad",
+      "location": "Butter Bird",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "92be45b7-178c-4240-bacd-e8da84ad85e0",
+      "quote_number": 1015,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 800,
+      "location_id": "29ab5085-6c62-4389-b80e-2b067eb890d2",
+      "location": "El Kabron WG",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "d9059419-8749-42a3-bcb3-d8059fd2f737",
+      "quote_number": 1017,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 800,
+      "location_id": "ab830f33-e198-4eda-9a59-d86858ae1f9f",
+      "location": "La Bandera",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "fe994d23-7798-4a88-b1eb-bba7aa8ca93d",
+      "quote_number": 1016,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 800,
+      "location_id": "eccba682-af12-438e-aefb-b800e63109e0",
+      "location": "El Kabron",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "ca11de30-6864-4abf-855c-958a4d4c42d0",
+      "quote_number": 1019,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 560,
+      "location_id": "b551ba25-02f0-47ef-9f02-0d1c3a4a3e79",
+      "location": "Thai Kitchen No 6",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "41f641eb-b4c1-45dd-a864-b765a796e886",
+      "quote_number": 1020,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 1344,
+      "location_id": "40a4c8da-c47a-46c2-86cb-2d7927944781",
+      "location": "Crossing Indian Bistro Leeds",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "2de4fd5f-c478-4248-83ec-b41cecb37196",
+      "quote_number": 1021,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 1008,
+      "location_id": "fcf8c7c2-815e-4429-9385-d431e6c607b1",
+      "location": "Rita Rays",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "366f7a23-426e-4526-87cd-5289f068d66e",
+      "quote_number": 1022,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "draft",
+      "total": 1008,
+      "location_id": "ac09fe8d-f6ef-462b-8b4c-0df29e158154",
+      "location": "Orchid NW",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "8589fd33-7598-45f9-b2d9-9a49a3df5ddc",
+      "quote_number": 1023,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 360,
+      "location_id": "8576f8f9-40ec-4887-b034-271aed440fad",
+      "location": "Butter Bird",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "3288fa93-a056-49a6-8c74-08faeee3988f",
+      "quote_number": 1025,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 1680,
+      "location_id": "1431a2da-a11a-4164-9175-e9e1628975ff",
+      "location": "Evuna - Northern Quarter",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "7455fa9c-c4ac-44de-b8da-1f686172c343",
+      "quote_number": 1024,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 1008,
+      "location_id": "c291a349-837c-41a0-a928-92b66592acef",
+      "location": "Evuna - Knutsford",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "3f274452-5a32-480a-bddf-44ec05597ad1",
+      "quote_number": 1026,
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "status": "won",
+      "total": 672,
+      "location_id": "41225a25-4e19-408a-b41b-d3a33083dd4e",
+      "location": "Verde - Macclesfield",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    }
+  ],
+  "onboardings": [
+    {
+      "id": "5fdd7f2b-4d32-4125-9726-4884c3bc44f7",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "on_hold",
+      "location_id": "3803b56d-603f-4f36-8f07-641440c74925",
+      "location": "Burgundi",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "60cba949-952c-4887-9560-fd51b4e960a4",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "handover_to_support",
+      "location_id": "b551ba25-02f0-47ef-9f02-0d1c3a4a3e79",
+      "location": "Thai Kitchen No 6",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "99b39efa-3d67-448d-ac92-af3770e4668d",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "on_hold",
+      "location_id": "29ab5085-6c62-4389-b80e-2b067eb890d2",
+      "location": "El Kabron WG",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "6424f626-2a98-4e61-b2f0-1c321dacf954",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "handover_to_support",
+      "location_id": "ac09fe8d-f6ef-462b-8b4c-0df29e158154",
+      "location": "Orchid NW",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "7da614c7-a953-4f50-adc7-9bc9cb003739",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "handover_to_support",
+      "location_id": "8576f8f9-40ec-4887-b034-271aed440fad",
+      "location": "Butter Bird",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "91a88745-a9f8-4a23-b46d-9560573a7d41",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "handover_to_support",
+      "location_id": "8576f8f9-40ec-4887-b034-271aed440fad",
+      "location": "Butter Bird",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "3a227df5-6cfb-4d88-8ac3-2535edde22d0",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "handover_to_support",
+      "location_id": "5169b1eb-bc7d-4b39-803a-72133ec33f59",
+      "location": "So Famous - Beehive Lofts",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "037ee015-e02a-40e7-9eb3-8ff4ec9791b8",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "on_hold",
+      "location_id": "eccba682-af12-438e-aefb-b800e63109e0",
+      "location": "El Kabron",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "e05a52ec-167b-41f8-ac52-17109d6b2c67",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "on_hold",
+      "location_id": "ab830f33-e198-4eda-9a59-d86858ae1f9f",
+      "location": "La Bandera",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "2a1301de-2bcc-4e1a-8327-bae58aba7492",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "handover_to_support",
+      "location_id": "40a4c8da-c47a-46c2-86cb-2d7927944781",
+      "location": "Crossing Indian Bistro Leeds",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "369a7426-08b2-4438-b4a1-15283037554a",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "handover_to_support",
+      "location_id": "fcf8c7c2-815e-4429-9385-d431e6c607b1",
+      "location": "Rita Rays",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "a61705dc-0e45-4609-9c84-27f2ca80bf19",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "account_menu_config",
+      "location_id": "1431a2da-a11a-4164-9175-e9e1628975ff",
+      "location": "Evuna - Northern Quarter",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "01a92db7-3416-49fd-aed1-61ed3260313a",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "on_hold",
+      "location_id": "c291a349-837c-41a0-a928-92b66592acef",
+      "location": "Evuna - Knutsford",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    },
+    {
+      "id": "da340375-7467-45e7-9eb2-5108bd8f6d8b",
+      "company_id": "3590a272-b739-4743-9ee4-4dd44c7bf8fa",
+      "stage": "account_menu_config",
+      "location_id": "41225a25-4e19-408a-b41b-d3a33083dd4e",
+      "location": "Verde - Macclesfield",
+      "location_company_id": "a3326f4c-047a-4cbd-a250-d7b30245808e"
+    }
+  ]
+}
