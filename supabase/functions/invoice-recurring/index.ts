@@ -105,7 +105,10 @@ serve(async (req) => {
     // Every due invoice now EXISTS and is dated correctly, which is the part
     // that must not slip. Emailing is what costs CPU, so it is capped: whatever
     // is left is picked up by the next run rather than killing this one.
-    const SEND_PER_RUN = 2;
+    // ONE. Proven by WORKER_RESOURCE_LIMIT on the catch-up run: two PDFs in a
+    // single invocation still kills the worker. One PDF is what an edge
+    // function can afford, and the 15-minute cron drains any backlog in hours.
+    const SEND_PER_RUN = 1;
     const sends: any[] = [];
     try {
       const { data: pending } = await supabase.from("invoices")
