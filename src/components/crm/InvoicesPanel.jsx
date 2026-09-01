@@ -157,10 +157,19 @@ export default function InvoicesPanel({ profile, onNavigate }) {
   // search box could only ever ask about one field at a time.
   const colMatch = (inv) => {
     const c = cols;
-    if (c.num && !`inv-${inv.invoice_number}`.toLowerCase().includes(c.num.toLowerCase().replace(/^inv-?/, 'inv-'))
-        && !String(inv.invoice_number).includes(c.num.replace(/\D/g, ''))) return false;
-    if (c.company && !(inv.company?.name || '').toLowerCase().includes(c.company.toLowerCase())) return false;
-    if (c.location && !(inv.location?.name || '').toLowerCase().includes(c.location.toLowerCase())) return false;
+    // Match against what the row actually SHOWS, including the label fallback
+    // in the company column. A filter that hides a row you can read is worse
+    // than no filter, because it looks like the invoice does not exist.
+    const { company, site } = partiesOf(inv);
+    if (c.num) {
+      const digits = c.num.replace(/\D/g, '');
+      const full = `inv-${inv.invoice_number}`.toLowerCase();
+      // Bare digits match the number; anything else matches the printed form.
+      const hit = digits ? String(inv.invoice_number).includes(digits) : full.includes(c.num.toLowerCase());
+      if (!hit) return false;
+    }
+    if (c.company && !(company || inv.label || '').toLowerCase().includes(c.company.toLowerCase())) return false;
+    if (c.location && !(site || '').toLowerCase().includes(c.location.toLowerCase())) return false;
     if (c.dueFrom && (!inv.due_date || inv.due_date < c.dueFrom)) return false;
     if (c.dueTo && (!inv.due_date || inv.due_date > c.dueTo)) return false;
     if (c.min && !(Number(inv.total) >= Number(c.min))) return false;
@@ -224,7 +233,7 @@ export default function InvoicesPanel({ profile, onNavigate }) {
 
   const input = "px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper focus:outline-none focus:border-ember";
   // One definition for header, filters and rows so the columns cannot drift.
-  const GRID = 'grid items-center gap-3 px-5 grid-cols-[90px_minmax(0,1.4fr)_minmax(0,1.4fr)_110px_110px_84px_32px]';
+  const GRID = 'grid items-center gap-3 px-5 grid-cols-[96px_minmax(0,1.4fr)_minmax(0,1.4fr)_148px_116px_88px_34px]';
   const colInput = 'w-full px-2 py-1 bg-card border border-bdr rounded-lg text-[11px] text-paper placeholder-dim focus:outline-none focus:border-ember';
   const setCol = (k, v) => setFilter('cols', { ...cols, [k]: v });
   const colsActive = Object.values(cols).some(Boolean);
@@ -291,9 +300,46 @@ export default function InvoicesPanel({ profile, onNavigate }) {
                   {search && <button onClick={() => setFilter('search', '')} className="text-xs text-dim hover:text-paper px-2 shrink-0">Clear</button>}
                 </div>
               </div>
+              {/* Column headings, then a filter under each one. The filters
+                  combine, so "Coffee Boy" + overdue + due-before is a single
+                  question instead of three passes through the list. */}
+              <div className={`${GRID} py-2 border-b border-bdr`}>
+                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-ember">Inv #</div>
+                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-ember">Company name</div>
+                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-ember">Location name</div>
+                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-ember text-right">Due date</div>
+                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-ember text-right">Amount</div>
+                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-ember text-center">Status</div>
+                <div />
+              </div>
+              <div className={`${GRID} py-2 border-b border-bdr bg-card/40`}>
+                <input className={colInput} value={cols.num} onChange={e => setCol('num', e.target.value)} placeholder="1085" />
+                <input className={colInput} value={cols.company} onChange={e => setCol('company', e.target.value)} placeholder="Filter company…" />
+                <input className={colInput} value={cols.location} onChange={e => setCol('location', e.target.value)} placeholder="Filter location…" />
+                <div className="flex flex-col gap-1">
+                  <input type="date" className={colInput} value={cols.dueFrom} onChange={e => setCol('dueFrom', e.target.value)} title="Due on or after" />
+                  <input type="date" className={colInput} value={cols.dueTo} onChange={e => setCol('dueTo', e.target.value)} title="Due on or before" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <input className={colInput + ' text-right'} value={cols.min} onChange={e => setCol('min', e.target.value)} placeholder="min" inputMode="decimal" />
+                  <input className={colInput + ' text-right'} value={cols.max} onChange={e => setCol('max', e.target.value)} placeholder="max" inputMode="decimal" />
+                </div>
+                <select className={colInput} value={statusFilter} onChange={e => setFilter('statusFilter', e.target.value)}>
+                  <option value="all">All</option><option value="draft">Draft</option>
+                  <option value="sent">Sent</option><option value="overdue">Overdue</option><option value="paid">Paid</option>
+                </select>
+                <div className="flex justify-center">
+                  {colsActive && (
+                    <button onClick={() => setFilter('cols', { num: '', company: '', location: '', dueFrom: '', dueTo: '', min: '', max: '' })}
+                      title="Clear column filters" className="text-dim hover:text-red-600 text-xs">&times;</button>
+                  )}
+                </div>
+              </div>
               <div className="divide-y divide-bdr">
                 {loading ? <div className="p-6 text-center text-dim text-sm">Loading…</div>
-                  : filtered.length === 0 ? <div className="p-8 text-center text-dim text-sm italic">No invoices yet — raise your first one.</div>
+                  : filtered.length === 0 ? <div className="p-8 text-center text-dim text-sm italic">
+                      {colsActive || search ? 'Nothing matches those filters.' : 'No invoices yet — raise your first one.'}
+                    </div>
                   : filtered.map(inv => {
                     const st = invStatus(inv);
                     const { company, site } = partiesOf(inv);
