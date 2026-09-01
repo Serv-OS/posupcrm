@@ -83,42 +83,12 @@ serve(async (req) => {
           })));
         }
 
-        // Auto-send by email when configured
-        let sent = false, sendError: string | null = null;
-        let recipient = (sched.email_to || "").trim();
-        if (!recipient && sched.contact_id) {
-          const { data: c } = await supabase.from("contacts").select("email").eq("id", sched.contact_id).maybeSingle();
-          recipient = c?.email || "";
-        }
-        if (sched.auto_send && recipient) {
-          try {
-            const { data: seller } = await supabase.from("support_settings")
-              .select("business_name, business_email, business_phone, quote_accent, logo_url").eq("id", 1).maybeSingle();
-            const appUrl = Deno.env.get("APP_URL") || "https://posupcrm.vercel.app";
-            const { subject, html } = invoiceEmailHtml(inv, seller || {}, `${appUrl}/i/${inv.public_token}`);
-
-            // Bill-to parties for the PDF (contact is the customer; company/location shown when linked).
-            const [{ data: contact }, { data: company }, { data: location }] = await Promise.all([
-              sched.contact_id ? supabase.from("contacts").select("first_name, last_name, email").eq("id", sched.contact_id).maybeSingle() : Promise.resolve({ data: null }),
-              sched.company_id ? supabase.from("companies").select("name").eq("id", sched.company_id).maybeSingle() : Promise.resolve({ data: null }),
-              sched.location_id ? supabase.from("locations").select("name").eq("id", sched.location_id).maybeSingle() : Promise.resolve({ data: null }),
-            ]);
-            const contactName = contact ? [contact.first_name, contact.last_name].filter(Boolean).join(" ") : "";
-            const pdfBytes = await buildInvoicePdfBytes({
-              inv, lines,
-              totals: { subtotal, tax: taxAmount, total },
-              seller: { name: (seller as any)?.business_name, email: (seller as any)?.business_email, phone: (seller as any)?.business_phone, accent: (seller as any)?.quote_accent, logo_url: (seller as any)?.logo_url },
-              billTo: { companyName: (company as any)?.name || "", contactName, contactEmail: recipient, locationName: (location as any)?.name || "" },
-              fmt: money,
-            });
-
-            await sendInvoiceEmail(supabase, recipient, subject, html, { filename: `INV-${inv.invoice_number}.pdf`, bytes: pdfBytes });
-            await supabase.from("invoices").update({ status: "sent", sent_at: new Date().toISOString(), email_to: recipient }).eq("id", inv.id);
-            sent = true;
-          } catch (e) {
-            sendError = (e as Error).message; // invoice stays draft for manual send
-          }
-        }
+        // NOTE: generation is deliberately CHEAP — no PDF, no email. Building a
+        // PDF costs more CPU than an edge function is allowed for a whole
+        // invocation, so doing it inline killed the worker after roughly one
+        // invoice and the remaining schedules were never even created. That is
+        // why August's twelve invoices dribbled out one a day from the 2nd to
+        // the 8th. Sending happens in its own capped pass below.
 
         // Advance the schedule so repeat runs don't duplicate
         await supabase.from("recurring_invoices").update({
@@ -131,7 +101,63 @@ serve(async (req) => {
         results.push({ schedule: sched.id, error: (e as Error).message });
       }
     }
-    return json({ generated: results.length, results });
+    // ── Pass 2: send, a few at a time ──────────────────────────────────────
+    // Every due invoice now EXISTS and is dated correctly, which is the part
+    // that must not slip. Emailing is what costs CPU, so it is capped: whatever
+    // is left is picked up by the next run rather than killing this one.
+    const SEND_PER_RUN = 2;
+    const sends: any[] = [];
+    try {
+      const { data: pending } = await supabase.from("invoices")
+        .select("*, recurring:recurring_invoices!inner(auto_send, email_to, contact_id)")
+        .eq("status", "draft").not("recurring_id", "is", null).is("sent_at", null)
+        .order("invoice_number", { ascending: true }).limit(SEND_PER_RUN * 4);
+
+      for (const inv of (pending || [])) {
+        if (sends.length >= SEND_PER_RUN) break;
+        const sched: any = (inv as any).recurring;
+        if (!sched?.auto_send) continue;
+        let recipient = (sched.email_to || "").trim();
+        if (!recipient && sched.contact_id) {
+          const { data: c } = await supabase.from("contacts").select("email").eq("id", sched.contact_id).maybeSingle();
+          recipient = c?.email || "";
+        }
+        if (!recipient) continue;               // stays a draft for a human to send
+        try {
+          const { data: lines } = await supabase.from("invoice_line_items").select("*").eq("invoice_id", inv.id).order("sort");
+          const { data: seller } = await supabase.from("support_settings")
+            .select("business_name, business_email, business_phone, quote_accent, logo_url").eq("id", 1).maybeSingle();
+          const appUrl = Deno.env.get("APP_URL") || "https://posupcrm.vercel.app";
+          const { subject, html } = invoiceEmailHtml(inv, seller || {}, `${appUrl}/i/${inv.public_token}`);
+          const [{ data: company }, { data: location }, { data: contact }] = await Promise.all([
+            inv.company_id ? supabase.from("companies").select("name").eq("id", inv.company_id).maybeSingle() : Promise.resolve({ data: null }),
+            inv.location_id ? supabase.from("locations").select("name").eq("id", inv.location_id).maybeSingle() : Promise.resolve({ data: null }),
+            inv.contact_id ? supabase.from("contacts").select("first_name, last_name").eq("id", inv.contact_id).maybeSingle() : Promise.resolve({ data: null }),
+          ]);
+          const pdfBytes = await buildInvoicePdfBytes({
+            inv, lines: lines || [],
+            totals: { subtotal: inv.subtotal, tax: inv.tax_amount, total: inv.total },
+            seller: { name: (seller as any)?.business_name, email: (seller as any)?.business_email, phone: (seller as any)?.business_phone, accent: (seller as any)?.quote_accent, logo_url: (seller as any)?.logo_url },
+            billTo: {
+              companyName: (company as any)?.name || "",
+              contactName: contact ? [(contact as any).first_name, (contact as any).last_name].filter(Boolean).join(" ") : "",
+              contactEmail: recipient, locationName: (location as any)?.name || "",
+            },
+            fmt: money, taxLabel: "VAT", dateLocale: "en-GB",
+          });
+          await sendInvoiceEmail(supabase, recipient, subject, html, { filename: `INV-${inv.invoice_number}.pdf`, bytes: pdfBytes });
+          await supabase.from("invoices").update({ status: "sent", sent_at: new Date().toISOString(), email_to: recipient }).eq("id", inv.id);
+          sends.push({ invoice: inv.invoice_number, to: recipient, sent: true });
+        } catch (e) {
+          // Leave it a draft: the next run retries it, and a human can send it.
+          sends.push({ invoice: inv.invoice_number, sent: false, error: (e as Error).message });
+        }
+      }
+    } catch (e) {
+      sends.push({ error: (e as Error).message });
+    }
+
+    return json({ generated: results.length, results, sent: sends.length, sends });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }
