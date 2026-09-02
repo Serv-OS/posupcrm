@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { readPresence } from '../lib/presence.js';
 
 const FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 
@@ -32,8 +33,9 @@ export default function TeamActivity({ profile }) {
   const [error, setError] = useState('');
   const [focus, setFocus] = useState(null); // person id to filter the feed by
 
-  const load = async () => {
-    setLoading(true); setError('');
+  const load = async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
+    setError('');
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`${FN}/team-activity`, {
@@ -48,6 +50,21 @@ export default function TeamActivity({ profile }) {
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
+
+  // "Right now" is only true if it keeps refreshing. Poll while the owner is
+  // actually looking: a hidden tab would just burn a query every 30s to redraw
+  // something nobody can see.
+  useEffect(() => {
+    let t;
+    const tick = () => {
+      t = setTimeout(async () => {
+        if (document.visibilityState === 'visible') await load({ quiet: true });
+        tick();
+      }, 30_000);
+    };
+    tick();
+    return () => clearTimeout(t);
+  }, []);
 
   if (profile.role !== 'owner') {
     return <div className="p-8 text-muted text-sm">Only owners can see team activity.</div>;
@@ -98,7 +115,7 @@ export default function TeamActivity({ profile }) {
               <thead>
                 <tr className="text-[10px] font-mono uppercase tracking-wider text-dim border-b border-bdr">
                   <th className="text-left px-4 py-2.5 font-medium">Person</th>
-                  <th className="text-left px-3 py-2.5 font-medium">Last login</th>
+                  <th className="text-left px-3 py-2.5 font-medium">Right now</th>
                   <th className="text-left px-3 py-2.5 font-medium">Last action</th>
                   <th className="text-left px-3 py-2.5 font-medium">Last 14 days</th>
                   <th className="text-right px-3 py-2.5 font-medium">Active days</th>
@@ -123,8 +140,29 @@ export default function TeamActivity({ profile }) {
                         </div>
                         <div className="text-[11px] text-dim">{p.email}</div>
                       </td>
-                      <td className="px-3 py-3 text-xs text-muted whitespace-nowrap" title={stamp(p.last_login)}>
-                        {ago(p.last_login)}
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {(() => {
+                          const pr = readPresence(p.presence);
+                          const dot = pr.tone === 'green' ? 'bg-emerald-500'
+                            : pr.tone === 'amber' ? 'bg-amber-500' : 'bg-slate-300';
+                          return (
+                            <>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full ${dot} ${pr.tone === 'green' ? 'animate-pulse' : ''}`} />
+                                <span className={`text-xs ${pr.open ? 'text-paper font-medium' : 'text-muted'}`}>{pr.label}</span>
+                              </div>
+                              {/* Which screen they are on, when they are actually on one. */}
+                              {pr.open && p.presence?.page && (
+                                <div className="text-[10px] text-dim ml-3.5">on {String(p.presence.page).replace(/_/g, ' ')}</div>
+                              )}
+                              {!pr.open && p.last_password_sign_in && (
+                                <div className="text-[10px] text-dim ml-3.5" title={stamp(p.last_password_sign_in)}>
+                                  signed in {ago(p.last_password_sign_in)}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </td>
                       <td className="px-3 py-3 max-w-[280px]">
                         <div className="text-xs text-paper truncate" title={p.last_action || ''}>{p.last_action || '—'}</div>
@@ -156,6 +194,14 @@ export default function TeamActivity({ profile }) {
           </div>
         </div>
 
+        <div className="text-[11px] text-dim">
+          <span className="text-muted">Right now</span> is a heartbeat from their browser, every 30 seconds while the
+          CRM is open. It stops the moment a laptop sleeps or the tab is closed, so
+          <span className="text-muted"> asleep or closed</span> means nothing has been heard for 8 minutes rather than
+          that they pressed anything. <span className="text-muted">Open but idle</span> means the CRM is in front of
+          them but untouched. Signed in is when they last typed their password, which can be months ago on a session
+          that never expired, so it is not a sign of absence.
+        </div>
         <div className="text-[11px] text-dim">
           <span className="text-muted">Active day</span> = they logged a note, call, email, SMS or chat, logged time,
           moved something's stage, completed a task, wrote a handover, or raised a quote or invoice.

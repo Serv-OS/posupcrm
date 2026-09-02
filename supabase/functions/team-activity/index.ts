@@ -64,13 +64,20 @@ Deno.serve(async (req) => {
       console.error('listUsers failed:', (e as Error).message);
     }
 
-    // agent_status is written by the phone bar's heartbeat — "app was open".
-    // It has no migration in this repo, so never let its absence break the page.
-    const seen = new Map<string, string>();
+    // user_presence is the real "is the CRM open" signal, written by the app
+    // shell on every screen. Its beats STOP when a machine sleeps or a tab
+    // closes, which is exactly how "asleep" is detected — staleness is the
+    // answer, not a fault.
+    //
+    // Deliberately NOT agent_status: that column is Twilio call presence and
+    // decides whether a call rings someone. Overloading it has already sent a
+    // customer to voicemail once.
+    const presence = new Map<string, Record<string, unknown>>();
     try {
-      const { data: st } = await admin.from('agent_status').select('profile_id, last_seen_at, status');
-      for (const r of st || []) if (r.profile_id) seen.set(r.profile_id, r.last_seen_at);
-    } catch { /* table may not exist on this instance */ }
+      const { data: pr } = await admin.from('user_presence')
+        .select('profile_id, state, last_seen_at, last_active_at, session_started_at, page');
+      for (const r of pr || []) if (r.profile_id) presence.set(r.profile_id, r);
+    } catch { /* table not migrated yet — the page must still render */ }
 
     // ── What they did ───────────────────────────────────────────────────────
     // Two sources cover almost everything a person does here: activities they
@@ -183,8 +190,12 @@ Deno.serve(async (req) => {
         email: p.email,
         role: p.role,
         teams: p.teams || [],
-        last_login: auth?.last_sign_in_at || null,
-        last_seen: seen.get(p.id) || null,
+        // Renamed on the way out: this is when they last TYPED THEIR PASSWORD,
+        // not when they were last here. A refresh token keeps a session alive
+        // for months, so treating it as "last seen" said an owner using the CRM
+        // daily had been absent for 69 days.
+        last_password_sign_in: auth?.last_sign_in_at || null,
+        presence: presence.get(p.id) || null,
         last_action_at: last?.at || null,
         last_action: last?.what || null,
         actions_7d: in7.length,

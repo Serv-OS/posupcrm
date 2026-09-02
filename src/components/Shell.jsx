@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { usePresence } from '../lib/usePresence';
 import { supabase } from '../lib/supabase';
 import Sidebar from './Sidebar.jsx';
 import PhoneBar from './PhoneBar.jsx';
@@ -103,6 +104,11 @@ export default function Shell({ session }) {
   const [askOpen, setAskOpen] = useState(false);
   const [leadPrefill, setLeadPrefill] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem('servos-crm-theme') || 'light');
+
+  // Heartbeat so the activity monitor can tell "at their desk" from "left the
+  // tab open" from "laptop asleep". Lives in the shell, not the phone bar, so
+  // it runs for everyone on every screen.
+  usePresence(profile?.id, view);
 
   useEffect(() => {
     document.body.classList.toggle('dark', theme === 'dark');
