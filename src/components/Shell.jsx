@@ -2,6 +2,10 @@ import { useEffect, useState, useRef } from 'react';
 import { usePresence } from '../lib/usePresence';
 import { supabase } from '../lib/supabase';
 import Sidebar from './Sidebar.jsx';
+import MobileInbox from './crm/MobileInbox.jsx';
+import { OfflineBanner } from './crm/ui.jsx';
+import { useIsMobile } from '../lib/useMedia';
+import { watch as watchOfflineQueue } from '../lib/offlineQueue';
 import PhoneBar from './PhoneBar.jsx';
 import NotificationBell from './NotificationBell.jsx';
 import TimerWidget from './TimerWidget.jsx';
@@ -72,6 +76,12 @@ import FormsList from './crm/FormsList.jsx';
 import FormBuilder from './crm/FormBuilder.jsx';
 import TemplatesPanel from './crm/TemplatesPanel.jsx';
 import MyWork from './crm/MyWork.jsx';
+import TodayPanel from './crm/TodayPanel.jsx';
+import WorkBoard from './crm/WorkBoard.jsx';
+import Timeline from './crm/Timeline.jsx';
+import WorkCalendar from './crm/WorkCalendar.jsx';
+import MobileNav from './MobileNav.jsx';
+import QuickAddCommand from './crm/QuickAddCommand.jsx';
 import InboxPanel from './crm/InboxPanel.jsx';
 import CalendarPanel from './crm/CalendarPanel.jsx';
 import ChatPanel from './crm/ChatPanel.jsx';
@@ -80,6 +90,9 @@ import LeadDetail from './crm/LeadDetail.jsx';
 import ProductsPanel from './crm/ProductsPanel.jsx';
 import QuoteBuilder from './crm/QuoteBuilder.jsx';
 import { Sun, Moon, Sparkles } from 'lucide-react';
+
+// Views laid out to the Projects & Tasks spec at every width; opts them out of the old mobile CSS hacks.
+const WORK_VIEWS = new Set(['today', 'tasks', 'task_detail', 'projects', 'project_detail', 'work', 'work_board', 'work_timeline', 'work_calendar', 'people', 'project_templates']);
 
 // The URL reflects the current view so refresh, the browser back button and
 // "open in new tab" all land on the right page. Scheme: #<view> for a
@@ -97,6 +110,9 @@ export default function Shell({ session }) {
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [view, setView]         = useState(() => parseHash().view);
+  const isMobile = useIsMobile();
+  // Writes made without signal send themselves when it returns (screen 18).
+  useEffect(() => watchOfflineQueue(supabase), []);
   const [openItem, setOpenItem] = useState(null);
   const [detailId, setDetailId] = useState(() => parseHash().detailId);
   const firstUrlSync = useRef(true);
@@ -192,6 +208,7 @@ export default function Shell({ session }) {
     else if (type === 'deal') { setView('deal_detail'); setDetailId(id); }
     else if (type === 'onboarding') { setView('onboarding_detail'); setDetailId(id); }
     else if (type === 'ticket') { setView('ticket_detail'); setDetailId(id); }
+    else if (type === 'feature_request') { setView('feature_request_detail'); setDetailId(id); }
     else if (type === 'project') { setView('project_detail'); setDetailId(id); }
     else if (type === 'task') { setView('task_detail'); setDetailId(id); }
     else if (type === 'lead') { if (id) { setView('lead_detail'); setDetailId(id); } else setView('leads'); }
@@ -257,9 +274,25 @@ export default function Shell({ session }) {
 
   const renderMain = () => {
     switch (view) {
+      case 'work':
+      case 'work_board':
+        return <WorkBoard profile={profile} onNavigate={(k, id) => (id ? navigateTo(k, id) : setView(k))} initialTab="board" />;
+      case 'people':
+        return <WorkBoard profile={profile} onNavigate={(k, id) => (id ? navigateTo(k, id) : setView(k))} initialTab="people" />;
+      case 'work_timeline':
+        return <Timeline profile={profile} onNavigate={(k, id) => (id ? navigateTo(k, id) : setView(k))} />;
+      case 'work_calendar':
+        return <WorkCalendar profile={profile} onNavigate={(k, id) => (id ? navigateTo(k, id) : setView(k))} />;
+      case 'today':
+        return <TodayPanel profile={profile} onNavigate={navigateTo} />;
+      // Kept reachable on purpose while the redesign settles: if Today has a
+      // bad day, the old screen is one nav click away rather than a revert.
       case 'mywork':
         return <MyWork profile={profile} onNavigate={navigateTo} />;
+      case 'inbox_mail':
+        return <InboxPanel profile={profile} onNavigate={navigateTo} />;
       case 'inbox':
+        if (isMobile) return <MobileInbox profile={profile} onNavigate={navigateTo} onOpenMail={() => setView('inbox_mail')} />;
         return <InboxPanel profile={profile} onNavigate={navigateTo} />;
       case 'calendar':
         return <CalendarPanel profile={profile} onNavigate={navigateTo} />;
@@ -396,15 +429,15 @@ export default function Shell({ session }) {
       case 'form_detail':
         return <FormBuilder formId={detailId} profile={profile} onClose={() => setView('forms')} onNavigate={navigateTo} />;
       case 'tasks':
-        return <TaskList profile={profile} onSelect={(id) => { setView('task_detail'); setDetailId(id); }} />;
+        return <TaskList profile={profile} onSelect={(id) => { setView('task_detail'); setDetailId(id); }} onNavigate={(k, id) => (id ? navigateTo(k, id) : setView(k))} />;
       case 'task_detail':
-        return <TaskDetail taskId={detailId} profile={profile} onClose={() => setView('tasks')} onNavigate={navigateTo} />;
+        return <TaskDetail key={detailId} taskId={detailId} profile={profile} onClose={() => setView('tasks')} onNavigate={navigateTo} />;
       case 'projects':
-        return <ProjectList profile={profile} onSelect={(id) => { setView('project_detail'); setDetailId(id); }} />;
+        return <ProjectList profile={profile} onSelect={(id) => { setView('project_detail'); setDetailId(id); }} onNavigate={(k, id) => (id ? navigateTo(k, id) : setView(k))} />;
       case 'project_templates':
         return <ProjectTemplates profile={profile} />;
       case 'project_detail':
-        return <ProjectDetail projectId={detailId} profile={profile}
+        return <ProjectDetail key={detailId} projectId={detailId} profile={profile}
           onClose={() => setView('projects')}
           onSelectTask={(id) => { setView('task_detail'); setDetailId(id); }}
           onNavigate={navigateTo} />;
@@ -437,6 +470,7 @@ export default function Shell({ session }) {
           onSignOut={signOut}
           onRefresh={load}
           theme={theme}
+          onNavigate={navigateTo}
         />
       </div>
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
@@ -461,8 +495,10 @@ export default function Shell({ session }) {
           <NotificationBell profile={profile} onNavigate={navigateTo} />
         </div>
       </div>
-      <main className="flex-1 min-w-0 overflow-hidden">
-        {renderMain()}
+      <main className={`flex-1 min-w-0 overflow-hidden lg:flex lg:flex-col ${WORK_VIEWS.has(view) ? 'work' : ''}`}>
+        {/* The offline banner sits above the page and pushes it down (18); the Inbox draws its own. */}
+        {isMobile && view !== 'inbox' && <OfflineBanner onView={() => setView('inbox')} />}
+        <div className="contents lg:block lg:flex-1 lg:min-h-0">{renderMain()}</div>
       </main>
       </div>
       <AskPanel open={askOpen} onClose={() => setAskOpen(false)} scope={askScope} />
@@ -473,6 +509,9 @@ export default function Shell({ session }) {
           onClose={() => setOpenItem(null)}
         />
       )}
+      <QuickAddCommand profile={profile} onNavigate={(k, id) => (id ? navigateTo(k, id) : setView(k))} context={view === 'project_detail' ? { projectId: detailId } : null} />
+      <MobileNav profile={profile} view={view} onGo={(k) => { setDetailId(null); setView(k); }} />
+
     </div>
   );
 }

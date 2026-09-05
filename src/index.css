@@ -48,6 +48,35 @@
   --scene: #F5F7F4;
   --drawer-bg: #eef1ec;
   --scroll-thumb: rgba(15,18,17,0.18);
+
+  /* ── Design-spec token layer ────────────────────────────────────────────
+     The projects/tasks spec draws every screen from these names and never
+     from a literal value, so the same markup re-themes per instance. Mapped
+     onto what this instance already has; only the genuinely new ones are
+     defined. The two *-deep additions are DARKENED existing hues for text on
+     a tint, not new colours. */
+  --c-amber-deep: 154 103 16;
+  --c-coral-deep: 196 49 34;
+
+  --desk: #EDEFEA;
+  --scene-bg: radial-gradient(50% 40% at 92% -4%, rgb(var(--c-primary) / .14), transparent 60%), var(--scene);
+  --panel-bg: var(--panel);
+  --surface-solid: #FFFFFF;
+  --ink-strong: rgba(15,18,17,.12);
+  --dash-line: rgba(15,18,17,.18);
+  --check-bdr: #C9D2CB;
+  --on-accent: #FFFFFF;
+  --on-inverse-soft: rgba(255,255,255,.82);
+  --on-inverse-line: rgba(255,255,255,.20);
+
+  /* Elevation: the spec's five names over this instance's glass shadows. */
+  --shadow-card: 0 6px 18px rgba(20,40,28,.07);
+  --shadow-tile: 0 2px 6px rgba(20,40,28,.06);
+  --shadow-frame: 0 10px 30px rgba(20,40,28,.10);
+  --shadow-pop: 0 8px 24px rgba(20,40,28,.22);
+  --shadow-accent: 0 4px 12px rgb(var(--c-primary) / .16);
+
+  --font-display: 'Syne', 'Space Grotesk', system-ui, sans-serif;
 }
 
 body.dark {
@@ -80,9 +109,26 @@ body.dark {
   --scene: #0F1211;
   --drawer-bg: #14181a;
   --scroll-thumb: rgba(255,255,255,0.18);
+
+  /* Spec tokens, dark. Surfaces and lines invert; the brand hues do not. */
+  --desk: #0B0E0D;
+  --scene-bg: radial-gradient(50% 40% at 92% -4%, rgb(var(--c-primary) / .10), transparent 60%), var(--scene);
+  --panel-bg: var(--panel);
+  --surface-solid: #191D1B;
+  --ink-strong: rgba(255,255,255,.14);
+  --dash-line: rgba(255,255,255,.20);
+  --check-bdr: rgba(255,255,255,.28);
+  --shadow-card: 0 6px 18px rgba(0,0,0,.30);
+  --shadow-tile: 0 2px 6px rgba(0,0,0,.26);
+  --shadow-frame: 0 10px 30px rgba(0,0,0,.38);
+  --shadow-pop: 0 8px 24px rgba(0,0,0,.45);
+
 }
 
 html, body, #root { height: 100%; }
+
+/* The phone tab bar's real height. Everything that has to clear it reads this. */
+:root { --tabbar-h: 64px; }
 
 /* Phones: --app-vh is the visual viewport height, published by main.jsx. It
    shrinks when the keyboard opens, so bottom-docked UI (the ticket reply box)
@@ -295,12 +341,14 @@ body {
 }
 
 @media (max-width: 640px) {
-  .grid.grid-cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
-  .grid.grid-cols-3 { grid-template-columns: minmax(0, 1fr) !important; }
-  .grid.grid-cols-2 { grid-template-columns: minmax(0, 1fr) !important; }
+  main .grid.grid-cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  main .grid.grid-cols-3 { grid-template-columns: minmax(0, 1fr) !important; }
+  main .grid.grid-cols-2 { grid-template-columns: minmax(0, 1fr) !important; }
   .max-w-\[1400px\], .max-w-5xl, .max-w-4xl, .max-w-3xl, .max-w-2xl { max-width: 100% !important; }
-  .border-b.flex.items-center { flex-wrap: wrap; row-gap: 0.5rem; }
-  .border-b.flex.items-center > .flex-1 { flex-basis: 100%; }
+  main .border-b.flex.items-center { flex-wrap: wrap; row-gap: 0.5rem; }
+  main .border-b.flex.items-center > .flex-1 { flex-basis: 100%; }
+  .work .border-b.flex.items-center { flex-wrap: nowrap; row-gap: 0; }
+  .work .border-b.flex.items-center > .flex-1 { flex-basis: 0%; }
   input.w-72, input.w-56, input.w-48 { width: 100% !important; }
 }
 
@@ -317,6 +365,14 @@ body {
   main:not(:has([data-ticket-screen])) {
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
+    /* Clear the fixed tab bar and the home indicator, or the last row of every
+       list sits underneath the nav and cannot be tapped. */
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+  }
+  /* The ticket screen keeps its own docked layout, so it clears the bar itself
+     rather than inheriting padding that would push its reply box off-screen. */
+  main:has([data-ticket-screen]) {
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   }
   main:not(:has([data-ticket-screen])) .h-full {
     height: auto !important;
