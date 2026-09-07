@@ -142,10 +142,23 @@ export default function PublicQuote({ token }) {
       {/* Totals */}
       <div className="px-6 sm:px-8 py-4 bg-slate-50 border-y border-slate-200">
         <div className="ml-auto max-w-xs space-y-1">
-          <Row k="One-off subtotal" v={money(q.one_off_subtotal)} />
+          <Row k="One-off subtotal (ex VAT)" v={money(q.one_off_subtotal)} />
           <Row k="VAT" v={money(q.tax_amount)} />
           <Row k="Due on acceptance" v={money(q.one_off_total)} bold accent={accent} />
-          {q.recurring_arr > 0 && <Row k="Ongoing (per year)" v={money(q.recurring_arr)} sub />}
+          {q.recurring_arr > 0 && (() => {
+            // Recurring is quoted ex VAT like everything else; the tax is shown on top.
+            const rec = (data.items || []).filter(i => i.category === 'saas' || i.category === 'payments');
+            const vat = rec.reduce((s2, i) => {
+              const yearly = i.category === 'saas' && i.billing_type === 'monthly' ? Number(i.line_total || 0) * 12 : Number(i.line_total || 0);
+              const rate = i.category === 'payments' && i.tax_rate == null ? 0 : Number(i.tax_rate) || 0;
+              return s2 + yearly * rate / 100;
+            }, 0);
+            return (<>
+              <Row k="Ongoing per year (ex VAT)" v={money(q.recurring_arr)} sub />
+              {vat > 0 && <Row k="VAT on ongoing" v={money(vat)} sub />}
+              {vat > 0 && <Row k="Ongoing per year (inc VAT)" v={money(q.recurring_arr + vat)} sub />}
+            </>);
+          })()}
         </div>
         {q.go_live_date && <div className="text-xs text-slate-500 mt-3">Planned go-live: <strong>{fmtDate(q.go_live_date)}</strong></div>}
       </div>
