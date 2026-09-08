@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { zoneOptions, zoneLabel, DEFAULT_TZ } from '../../lib/staffClock';
 import { Plus, X } from 'lucide-react';
 
 export default function StaffView({ profile, onOpenUsers }) {
@@ -12,7 +13,7 @@ export default function StaffView({ profile, onOpenUsers }) {
   useEffect(() => { load(); }, []);
   const load = async () => {
     const [p, d, a] = await Promise.all([
-      supabase.from('profiles').select('id, display_name, email, mobile, role, department_id, coverable_area_ids, default_weekly_hours, leave_entitlement_days').order('display_name'),
+      supabase.from('profiles').select('id, display_name, email, mobile, role, department_id, coverable_area_ids, default_weekly_hours, timezone, leave_entitlement_days').order('display_name'),
       supabase.from('departments').select('*').order('name'),
       supabase.from('areas').select('*').order('name'),
     ]);
@@ -79,6 +80,7 @@ function StaffEditModal({ staff, departments, areas, onClose, onSaved }) {
     department_id: staff.department_id || '',
     coverable_area_ids: staff.coverable_area_ids || [],
     default_weekly_hours: staff.default_weekly_hours ?? 40,
+    timezone: staff.timezone || '',
     leave_entitlement_days: staff.leave_entitlement_days ?? 28,
     mobile: staff.mobile || '',
   });
@@ -90,6 +92,7 @@ function StaffEditModal({ staff, departments, areas, onClose, onSaved }) {
       department_id: f.department_id || null,
       coverable_area_ids: f.coverable_area_ids,
       default_weekly_hours: Number(f.default_weekly_hours) || null,
+      timezone: f.timezone || null,
       leave_entitlement_days: Number(f.leave_entitlement_days) || null,
       mobile: f.mobile.trim() || null,
     }).eq('id', staff.id);
@@ -125,6 +128,14 @@ function StaffEditModal({ staff, departments, areas, onClose, onSaved }) {
           <div className="grid grid-cols-2 gap-3">
             <div><label className={label}>Weekly hours</label><input className={input} value={f.default_weekly_hours} onChange={e => set('default_weekly_hours', e.target.value)} /></div>
             <div><label className={label}>Leave entitlement (days)</label><input className={input} value={f.leave_entitlement_days} onChange={e => set('leave_entitlement_days', e.target.value)} /></div>
+          </div>
+          <div>
+            <label className={label}>Timezone</label>
+            <select className={input} value={f.timezone} onChange={e => set('timezone', e.target.value)}>
+              <option value="">Business default</option>
+              {zoneOptions(DEFAULT_TZ).map(z => <option key={z} value={z}>{zoneLabel(z)} ({z})</option>)}
+            </select>
+            <div className="text-[10px] text-dim mt-1">Their clock-in times are read on this clock, so a shift abroad reads right here.</div>
           </div>
           <div><label className={label}>Mobile (for SMS)</label><input className={input} value={f.mobile} onChange={e => set('mobile', e.target.value)} placeholder="+447…" /></div>
           <div className="flex gap-2 pt-1"><button onClick={save} className="btn-glass px-5 py-2 rounded-xl text-sm font-semibold">Save</button>

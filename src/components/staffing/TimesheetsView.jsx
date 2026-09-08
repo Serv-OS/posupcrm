@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
+import { punchTime, punchInput, zoneFor, isFallbackZone, zoneLabel, DEFAULT_TZ } from '../../lib/staffClock';
 import { ChevronLeft, ChevronRight, Check, AlertTriangle, Plane, Ban } from 'lucide-react';
 import { isoDate, mondayOf, weekDays, DOW_SHORT, fmtRange, shiftHours } from '../../lib/staffing';
 import MonthReport from './MonthReport.jsx';
@@ -26,19 +27,12 @@ function PeriodTabs({ period, setPeriod }) {
 // trigger freezes approved_by/at for non-managers), so this screen is the
 // only way hours become final.
 
-// Always render a punch in the timezone of the person who made it. Showing a
-// California punch on a London clock is what made "+481m late" look like a bug
-// rather than a timezone.
-const HHMM = (ts, tz) => ts ? new Date(ts).toLocaleTimeString('en-GB',
-  { hour: '2-digit', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) }) : '—';
-// 'YYYY-MM-DD HH:MM' in that person's zone — the format punch_edit expects.
-const localInput = (ts, tz) => {
-  if (!ts) return '';
-  const d = new Date(ts);
-  const opt = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, ...(tz ? { timeZone: tz } : {}) };
-  const parts = new Intl.DateTimeFormat('en-CA', opt).formatToParts(d).reduce((a, x) => (a[x.type] = x.value, a), {});
-  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
-};
+// Always render a punch on the clock of the person who made it, never the
+// reader's. A California punch shown on a London clock is what made "+481m
+// late" look like a bug rather than a timezone. Where a person has no zone we
+// use the business clock, never the device.
+const HHMM = punchTime;
+const localInput = punchInput;
 const asHrs = (m) => m == null ? '—' : `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).padStart(2, '0')}m`;
 // Positive = late in / late out. Small drifts aren't worth colouring.
 const varLabel = (m) => m == null || Math.abs(m) < 5 ? null : `${m > 0 ? '+' : ''}${Math.round(m)}m`;
@@ -55,6 +49,7 @@ const STATUS = {
 export default function TimesheetsView({ profile }) {
   const [monday, setMonday] = useState(() => mondayOf(new Date()));
   const [staff, setStaff] = useState([]);
+  const [businessTz, setBusinessTz] = useState(DEFAULT_TZ);
   const [punches, setPunches] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [timeOff, setTimeOff] = useState([]);
@@ -72,13 +67,14 @@ export default function TimesheetsView({ profile }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [p, pu, sh, off] = await Promise.all([
+    const [p, st, pu, sh, off] = await Promise.all([
       supabase.from('profiles').select('id, display_name, email, default_weekly_hours, timezone').order('display_name'),
+      supabase.from('support_settings').select('business_timezone').maybeSingle(),
       supabase.from('shift_punches').select('*').gte('business_date', weekStart).lte('business_date', weekEnd),
       supabase.from('shifts').select('*').gte('date', weekStart).lte('date', weekEnd),
       supabase.from('time_off').select('*').eq('status', 'approved').lte('start_date', weekEnd).gte('end_date', weekStart),
     ]);
-    setStaff(p.data || []); setPunches(pu.data || []); setShifts(sh.data || []); setTimeOff(off.data || []);
+    setStaff(p.data || []); setBusinessTz(st.data?.business_timezone || DEFAULT_TZ); setPunches(pu.data || []); setShifts(sh.data || []); setTimeOff(off.data || []);
     setLoading(false);
   }, [weekStart, weekEnd]);
   useEffect(() => { load(); }, [load]);
@@ -181,11 +177,10 @@ export default function TimesheetsView({ profile }) {
                     {(p.display_name || p.email || '?')[0].toUpperCase()}
                   </div>
                   <div className="font-semibold text-paper text-sm">{p.display_name || p.email}</div>
-                  {p.timezone && (
-                    <span className="text-[10px] text-muted" title="Their shift times mean this zone">
-                      {p.timezone.split('/').pop().replace(/_/g, ' ')} time
-                    </span>
-                  )}
+                  <span className="text-[10px] text-muted"
+                    title={isFallbackZone(p) ? 'No timezone set for this person, so times are shown in business time. Set one on their staff record.' : 'Times are shown on this person\u2019s own clock'}>
+                    {zoneLabel(zoneFor(p, businessTz))} time{isFallbackZone(p) ? ' (default)' : ''}
+                  </span>
                   {needsEye && (
                     <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg bg-red-100 text-red-700">
                       <AlertTriangle size={11} /> Needs checking
@@ -246,7 +241,7 @@ export default function TimesheetsView({ profile }) {
                             const vOut = varLabel(x.variance_finish_mins);
                             return (
                               <div key={x.id} className="flex items-center gap-2 flex-wrap text-xs">
-                                <span className="tabular-nums text-paper">{HHMM(x.clock_in, p.timezone)} → {x.clock_out ? HHMM(x.clock_out, p.timezone) : '…'}</span>
+                                <span className="tabular-nums text-paper">{HHMM(x.clock_in, zoneFor(p, businessTz))} → {x.clock_out ? HHMM(x.clock_out, zoneFor(p, businessTz)) : '…'}</span>
                                 {x.break_mins > 0 && <span className="text-muted">({x.break_mins}m break)</span>}
                                 <span className="font-semibold text-paper tabular-nums">{asHrs(x.worked_minutes)}</span>
                                 {vIn && <span className="text-[10px] text-amber-700" title="vs rota start">in {vIn}</span>}
@@ -262,8 +257,8 @@ export default function TimesheetsView({ profile }) {
                                     className="text-[11px] text-muted hover:text-paper disabled:opacity-50">Undo</button>
                                 )}
                                 {canApprove && (
-                                  <button onClick={() => setEdit({ punch: x, tz: p.timezone, name: p.display_name || p.email,
-                                    inStr: localInput(x.clock_in, p.timezone), outStr: localInput(x.clock_out, p.timezone), reason: '' })}
+                                  <button onClick={() => setEdit({ punch: x, tz: zoneFor(p, businessTz), name: p.display_name || p.email,
+                                    inStr: localInput(x.clock_in, zoneFor(p, businessTz)), outStr: localInput(x.clock_out, zoneFor(p, businessTz)), reason: '' })}
                                     className="text-[11px] text-muted hover:text-paper">Edit</button>
                                 )}
                                 {x.edited_at && <span className="text-[10px] text-dim" title={x.edit_reason || ''}>edited</span>}
