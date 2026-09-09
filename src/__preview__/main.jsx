@@ -17,6 +17,7 @@ import LeadDetail from '../components/crm/LeadDetail.jsx';
 import DealDetail from '../components/crm/DealDetail.jsx';
 import ReportingDashboard from '../components/crm/ReportingDashboard.jsx';
 import LocationDetail from '../components/crm/LocationDetail.jsx';
+import OnboardingDetail from '../components/crm/OnboardingDetail.jsx';
 import MobileNav from '../components/MobileNav.jsx';
 import QuickAddCommand from '../components/crm/QuickAddCommand.jsx';
 import { OfflineBanner } from '../components/crm/ui.jsx';
@@ -42,6 +43,7 @@ function App() {
         {v === 'quote' && <QuoteBuilder quoteId="q1" profile={P} onClose={nav} onNavigate={nav} />}
         {v === 'reporting' && <ReportingDashboard profile={P} onNavigate={nav} />}
         {v === 'deal' && <DealDetail dealId="d1" profile={P} onClose={nav} onNavigate={nav} />}
+        {v === 'onboarding' && <OnboardingDetail onboardingId="o2" profile={P} onClose={nav} onNavigate={nav} />}
         {v === 'lead' && <LeadDetail leadId="lead1" profile={P} onClose={nav} onNavigate={nav} />}
         {v === 'calls' && <CallLogPanel profile={P} onNavigate={nav} />}
         {v === 'inbox' && <MobileInbox profile={P} onNavigate={nav} />}
