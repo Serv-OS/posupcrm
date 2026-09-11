@@ -185,7 +185,11 @@ export default function ActivityTimeline({ subjectType, subjectId, profile, cont
         // fixed overlay and clip the dialog to the card.
         <div className="fixed inset-0 z-[60] bg-black/40 flex items-stretch sm:items-center justify-center sm:p-6"
           onClick={e => e.target === e.currentTarget && setAdding(false)}>
+          {/* Enter in a one-line field (Subject, To) used to submit the form and
+              save a half-written note. Only the Save button saves now; Enter in
+              the Details textarea is still a new line. */}
           <form onSubmit={save}
+            onKeyDown={e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT' && !e.nativeEvent.isComposing) e.preventDefault(); }}
             style={{ background: 'var(--scene)' }}
             className="sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl flex flex-col max-h-full overflow-y-auto p-5 sm:p-6 space-y-4">
             <div className="flex items-center gap-3">

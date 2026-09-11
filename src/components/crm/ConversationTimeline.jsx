@@ -1,7 +1,34 @@
-import { useEffect, useState, useRef, Fragment } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, useRef, Fragment } from 'react';
 import { supabase } from '../../lib/supabase';
 import { cleanEmailBody, hasQuotedTail } from '../../lib/emailText';
 import { emailHtmlFor, sanitizeEmailHtml } from '../../lib/emailHtml';
+import { buildReply, hasOtherRecipients, headerList, parseAddressList } from '../../lib/replyRecipients';
+import { finalRecipients } from '../../lib/composerRecipients';
+import { isSubmitKey, SUBMIT_HINT } from '../../lib/submitKey';
+import AddressInput from './AddressInput.jsx';
+
+// Older sends were stamped with this address, so it counts as ours too.
+const LEGACY_SUPPORT_ADDRESS = 'support@serv-os.app';
+// How close to the end counts as "reading the latest" (px).
+const NEAR_BOTTOM_PX = 120;
+
+// Rows are updated after insert (call recordings, recipients read back from the
+// mailbox, note edits) and there is no updated_at, so a reload compares what is
+// on screen. Cached per row object: rows already shown are the same objects on
+// every poll, so only the fresh response is stringified.
+const sigCache = new WeakMap();
+const rowSig = (r) => {
+  let s = sigCache.get(r);
+  if (s === undefined) {
+    s = JSON.stringify([r.id, r.occurred_at, r.is_internal, r.subject, r.body, r.edited_at, r.channel_metadata ?? null]);
+    sigCache.set(r, s);
+  }
+  return s;
+};
+const memberSig = (m) => `${m.id}|${m.email}|${m.display_name}`;
+const templateSig = (t) => JSON.stringify(t);
+const sameList = (prev, next, sig) => prev.length === next.length && prev.every((r, i) => sig(r) === sig(next[i]));
+const mentionIds = (text) => new Set([...String(text || '').matchAll(/@\[[^\]]+\]\(([^)]+)\)/g)].map((m) => m[1]));
 
 const TYPE_ICON = { call: '\u{1F4DE}', email: '\u{1F4E7}', sms: '\u{1F4AC}', note: '\u{1F4DD}', meeting: '\u{1F91D}', whatsapp: '\u{1F4F2}', chat: '\u{1F4AD}' };
 const TYPE_LABEL = { call: 'Call', email: 'Email', sms: 'SMS', note: 'Note', meeting: 'Meeting', whatsapp: 'WhatsApp', chat: 'Chat' };
@@ -26,7 +53,18 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
   const [channel, setChannel] = useState(ticketChannel || 'note');
   const [body, setBody] = useState('');
   const [subject, setSubject] = useState('');
-  const [toEmail, setToEmail] = useState(ticket?.customer_email || '');
+  // Email recipients as chips. Text typed but not yet a chip is tracked too, so
+  // Send can include it (or refuse it) instead of losing it.
+  const [toList, setToList] = useState([]);
+  const [ccList, setCcList] = useState([]);
+  const [toPending, setToPending] = useState('');
+  const [ccPending, setCcPending] = useState('');
+  const [replyMode, setReplyMode] = useState('reply'); // 'reply' | 'all'
+  const [recipDirty, setRecipDirty] = useState(false); // edited by hand: stop refilling from the thread
+  const [recipKey, setRecipKey] = useState(0);         // remounts the chip inputs, clearing typed text
+  const [mailboxes, setMailboxes] = useState([]);
+  const [fetchedRecipients, setFetchedRecipients] = useState({}); // activity id -> { from, to, cc, reply_to }
+  const recipientsAsked = useRef(new Set());
   const [toPhone, setToPhone] = useState(ticket?.customer_phone || '');
   const [direction, setDirection] = useState('outbound');
   const [callDuration, setCallDuration] = useState('');
@@ -43,6 +81,13 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [isMsCrm, setIsMsCrm] = useState(false);
+  // Inline edit of one of your own internal notes. The draft lives here, not on
+  // the row, so a reload while typing cannot overwrite it.
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
+  const editRef = useRef(null);
   const [mySignature, setMySignature] = useState('');
   const [sigPool, setSigPool] = useState({ names: [], template: '' });
   // Images/files staged in the composer to send with an email reply.
@@ -50,6 +95,12 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
   const attachRef = useRef(null);
   const bodyRef = useRef(null);
   const scrollRef = useRef(null);
+  // Scroll bookkeeping. nearBottom is written on scroll, so it describes the
+  // reader BEFORE new rows grow the list (appending rows fires no scroll event).
+  // lastId is the newest row already placed; undefined until the first paint.
+  const nearBottomRef = useRef(true);
+  const lastIdRef = useRef(undefined);
+  const [newCount, setNewCount] = useState(0);
   // Which inbound emails have their quoted history expanded.
   const [expanded, setExpanded] = useState(() => new Set());
   const toggleExpand = (id) => setExpanded(prev => {
@@ -76,10 +127,96 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
     return () => { cancelled = true; };
   }, [ticket?.customer_email, ticket?.contact_id, contacts]);
 
-  // Prefill the reply-To as soon as an address is known. Never clobbers a typed value.
+  // Our own addresses never go on a reply: the connected support mailbox, plus
+  // the address older sends were stamped with.
   useEffect(() => {
-    if (!toEmail && customerEmail) setToEmail(customerEmail);
-  }, [customerEmail]); // eslint-disable-line react-hooks/exhaustive-deps
+    supabase.from('gmail_connections_safe').select('email')
+      .then(r => setMailboxes((r.data || []).map(x => x.email).filter(Boolean)))
+      .catch(() => {});
+  }, []);
+  const ownEmails = useMemo(
+    () => [...new Set([...mailboxes, LEGACY_SUPPORT_ADDRESS].map(e => String(e).trim().toLowerCase()))],
+    [mailboxes]);
+
+  // The email a reply answers: the newest one in the thread, in either
+  // direction. Answering our own last email keeps the same people on it.
+  // Our automatic "we got your message" reply is skipped: it only ever goes to
+  // the sender, so answering it dropped everyone they had copied in.
+  const anchor = useMemo(() => {
+    for (let i = activities.length - 1; i >= 0; i--) {
+      const a = activities[i];
+      if (a.type === 'email' && !a.channel_metadata?.auto_reply) return a;
+    }
+    return null;
+  }, [activities]);
+  const anchorHeaders = useMemo(() => {
+    if (!anchor) return null;
+    const md = anchor.channel_metadata || {};
+    const got = fetchedRecipients[anchor.id];
+    return got
+      ? { from: got.from || md.from, to: got.to, cc: got.cc, reply_to: got.reply_to }
+      : { from: md.from, to: md.to, cc: md.cc, reply_to: md.reply_to };
+  }, [anchor, fetchedRecipients]);
+
+  // Emails captured before To and Cc were stored only know who sent them, so
+  // Reply all would have nobody to copy. Ask the mailbox once per email, here
+  // and never from the poll. Only Gmail-captured emails carry gmail_message_id.
+  const anchorId = anchor?.id;
+  const anchorNeedsHeaders = !!anchor?.channel_metadata?.gmail_message_id && !('to' in (anchor?.channel_metadata || {}));
+  useEffect(() => {
+    if (!anchorNeedsHeaders || subjectType !== 'ticket') return;
+    if (recipientsAsked.current.has(anchorId)) return;
+    recipientsAsked.current.add(anchorId);
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gmail-send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+          body: JSON.stringify({ action: 'recipients', activity_id: anchorId }),
+        });
+        if (!res.ok) return;
+        const d = await res.json();
+        setFetchedRecipients(prev => ({ ...prev, [anchorId]: d }));
+      } catch { /* Reply still works from the sender alone. */ }
+    })();
+  }, [anchorId, anchorNeedsHeaders, subjectType]);
+
+  // Who Reply / Reply all goes to. With no email in the thread yet (reaching
+  // out first) it is the ticket's customer.
+  const replyDefaults = (mode) => {
+    const fallback = parseAddressList(customerEmail).filter(a => !ownEmails.includes(a.email));
+    if (!anchorHeaders) return { to: fallback, cc: [] };
+    const r = buildReply(anchorHeaders, ownEmails, mode);
+    if (r.to.length) return r;
+    const taken = new Set(fallback.map(a => a.email));
+    return { to: fallback, cc: r.cc.filter(a => !taken.has(a.email)) };
+  };
+  const showReplyAll = !!anchorHeaders && hasOtherRecipients(anchorHeaders, ownEmails);
+  const defaults = replyDefaults(replyMode);
+  const defaultsKey = JSON.stringify(defaults);
+  // Keep the chips on the right people as the thread moves on (Cc read back
+  // from the mailbox, the customer address loading), until someone edits them
+  // by hand. `filledFrom` is the email they were filled from: once a reply is
+  // being written, a newer email landing never quietly changes who it goes to.
+  // The chips stay and a line above them offers to switch.
+  const [filledFrom, setFilledFrom] = useState(null);
+  useEffect(() => {
+    if (recipDirty) return;
+    if (body.trim() && toList.length && filledFrom && filledFrom !== (anchorId || null)) return;
+    setFilledFrom(anchorId || null);
+    setToList(defaults.to); setCcList(defaults.cc);
+  }, [defaultsKey, recipDirty, anchorId, recipKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sameEmails = (a, b) => a.length === b.length && a.every((x, i) => x.email === b[i].email);
+  const newerEmailWaiting = channel === 'email' && !!filledFrom && !!anchorId && filledFrom !== anchorId
+    && !(sameEmails(defaults.to, toList) && sameEmails(defaults.cc, ccList));
+
+  const resetRecipients = (mode = replyMode) => {
+    const d = replyDefaults(mode);
+    setReplyMode(mode); setToList(d.to); setCcList(d.cc); setFilledFrom(anchorId || null);
+    setToPending(''); setCcPending(''); setRecipDirty(false); setRecipKey(k => k + 1);
+  };
+  const editRecipients = (setter) => (list) => { setter(list); setRecipDirty(true); };
 
   // Support-mailbox provider: the microsoft_connections table exists only on the
   // Microsoft CRMs → reply via ms-send there, gmail-send otherwise.
@@ -126,36 +263,96 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
     // is primary; a slow poll is a fallback so replies still surface if the
     // realtime channel drops (e.g. laptop wake-from-sleep) or crm_activities
     // isn't in the DB's realtime publication.
+    // UPDATE too, so an edited note or a finished call shows for everyone.
     const ch = supabase.channel(`conv-${subjectType}-${subjectId}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'crm_activities', filter: `subject_id=eq.${subjectId}` },
+        load)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'crm_activities', filter: `subject_id=eq.${subjectId}` },
         load)
       .subscribe();
     const poll = setInterval(load, 25000);
     return () => { supabase.removeChannel(ch); clearInterval(poll); };
   }, [subjectType, subjectId]);
 
-  useEffect(() => {
-    // Scroll to bottom on new activities, and again whenever the list comes
-    // back into view. Skipped while hidden — clientHeight is 0 then and the
-    // write would be thrown away.
+  // Put the list at the newest message. Skipped while hidden (a phone's Details
+  // tab): clientHeight is 0 then and the write would be thrown away.
+  const pinToLatest = () => {
     const el = scrollRef.current;
-    if (el && el.clientHeight > 0) el.scrollTop = el.scrollHeight;
-  }, [activities, active]);
+    if (!el || el.clientHeight === 0) return false;
+    el.scrollTop = el.scrollHeight;
+    nearBottomRef.current = true;
+    setNewCount(0);
+    return true;
+  };
+
+  // Follow the conversation only when the reader is already at the end of it,
+  // or when the new message is their own. Someone scrolled up reading history
+  // keeps their place and gets a count on the Latest pill instead. The 25 s
+  // poll used to snap everyone back down to the bottom.
+  useLayoutEffect(() => {
+    if (!activities.length) return;
+    const lastId = activities[activities.length - 1].id;
+    if (lastIdRef.current === undefined) {
+      if (pinToLatest()) lastIdRef.current = lastId;
+      return;
+    }
+    // Same newest message (an edited note, a call finishing): never move.
+    if (lastId === lastIdRef.current) return;
+    const prevIdx = activities.findIndex(a => a.id === lastIdRef.current);
+    const added = prevIdx >= 0 ? activities.slice(prevIdx + 1) : [activities[activities.length - 1]];
+    lastIdRef.current = lastId;
+    const mine = added.some(a => a.actor_id && a.actor_id === profile.id);
+    if ((nearBottomRef.current || mine) && pinToLatest()) return;
+    setNewCount(c => c + added.length);
+  }, [activities]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Coming back to the Conversation tab on a phone lands on the latest message.
+  useEffect(() => {
+    if (!active || !activities.length) return;
+    if (pinToLatest()) lastIdRef.current = activities[activities.length - 1].id;
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Images in HTML emails finish loading after the first paint and push the end
+  // of the thread down. A reader who was at the end stays at the end.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onLoad = (e) => {
+      if (e.target?.tagName === 'IMG' && nearBottomRef.current && el.clientHeight > 0) el.scrollTop = el.scrollHeight;
+    };
+    el.addEventListener('load', onLoad, true);
+    // The list gets shorter when the reply box grows (Cc filled in after the
+    // mailbox answers, a long reply, the phone keyboard). Growing the box fires
+    // no scroll event, so without this a reader at the end was left a few
+    // lines short of the newest message. Someone scrolled up is never moved.
+    let ro = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => { if (nearBottomRef.current && el.clientHeight > 0) el.scrollTop = el.scrollHeight; });
+      ro.observe(el);
+    }
+    return () => { el.removeEventListener('load', onLoad, true); ro?.disconnect(); };
+  }, []);
 
   const load = async () => {
-    const [a, m, tpl] = await Promise.all([
-      supabase.from('crm_activities')
-        .select('*')
-        .eq('subject_type', subjectType)
-        .eq('subject_id', subjectId)
-        .order('occurred_at', { ascending: true }),
-      supabase.from('profiles').select('id, email, display_name'),
-      supabase.from('templates').select('*').order('name'),
-    ]);
-    setActivities(a.data || []);
-    setMembers(m.data || []);
-    setTemplates(tpl.data || []);
+    let a, m, tpl;
+    try {
+      [a, m, tpl] = await Promise.all([
+        supabase.from('crm_activities')
+          .select('*')
+          .eq('subject_type', subjectType)
+          .eq('subject_id', subjectId)
+          .order('occurred_at', { ascending: true }),
+        supabase.from('profiles').select('id, email, display_name'),
+        supabase.from('templates').select('*').order('name'),
+      ]);
+    } catch { return; } // offline: keep what is on screen
+    // Keep the same array when nothing changed, so a quiet poll re-renders
+    // nothing. A failed request keeps what is shown rather than emptying it.
+    if (!a.error && a.data) setActivities(prev => (sameList(prev, a.data, rowSig) ? prev : a.data));
+    if (!m.error && m.data) setMembers(prev => (sameList(prev, m.data, memberSig) ? prev : m.data));
+    if (!tpl.error && tpl.data) setTemplates(prev => (sameList(prev, tpl.data, templateSig) ? prev : tpl.data));
   };
 
   // Insert a template into the composer, filling placeholders
@@ -192,7 +389,7 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
       const t = d.suggested_type;
       if (t && ['note', 'email', 'sms', 'call'].includes(t)) {
         setChannel(t);
-        if (t === 'email' && customerEmail) setToEmail(customerEmail);
+        if (t === 'email' && !toList.length) resetRecipients();
         if (t === 'sms' && ticket?.customer_phone) setToPhone(ticket.customer_phone);
         if (t === 'email' && d.suggested_subject && !subject.trim()) setSubject(d.suggested_subject);
       }
@@ -271,7 +468,7 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
     if (attachRef.current) attachRef.current.value = '';
     const ok = [];
     for (const file of picked) {
-      if (file.size > 3 * 1024 * 1024) { alert(`${file.name} is over 3 MB — please attach a smaller image.`); continue; }
+      if (file.size > 3 * 1024 * 1024) { alert(`${file.name} is over 3 MB. Please attach a smaller image.`); continue; }
       ok.push({ file, name: file.name, size: file.size });
     }
     if (ok.length) setPendingFiles(prev => [...prev, ...ok]);
@@ -307,8 +504,13 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
   const save = async (nextStage) => {
     if (channel === 'note' && !body.trim()) return;
     if (channel === 'call' && !body.trim()) return;
-    if (channel === 'email' && (!body.trim() || !toEmail.trim())) return;
-    if (channel === 'sms' && (!body.trim() || !toPhone.trim())) return;
+    let recipients = null;
+    if (channel === 'email') {
+      if (!body.trim()) return;
+      recipients = finalRecipients({ to: toList, cc: ccList, toPending, ccPending });
+      if (recipients.problem) { setEditTo(true); alert(recipients.problem); return; }
+    }
+    if (channel === 'sms' && (!body.trim() || !(toPhone || ticket?.customer_phone || '').trim())) return;
     setSending(true);
 
     // Email: send via the support mailbox — ms-send (Microsoft) or gmail-send (Gmail)
@@ -327,22 +529,25 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
             },
             body: JSON.stringify({
               ticket_id: subjectId,
-              to: toEmail.trim(),
+              to: headerList(recipients.to),
+              cc: headerList(recipients.cc) || null,
               subject: null, // always reply with the customer's email subject ("Re: …", threaded server-side)
               body: (() => { const sig = signatureForSend(); return body.trim() + (sig ? `\n\n--\n${sig}` : ''); })(),
               attachments: attachRefs,
             }),
           }
         );
-        const result = await res.json();
+        const result = await res.json().catch(() => ({}));
         if (!res.ok) {
-          alert('Email send failed: ' + (result.error || 'Unknown error'));
+          alert('Email send failed: ' + (result.error || `Unknown error (${res.status})`));
           setSending(false);
           return;
         }
-        // Success - activity was created by the edge function
+        // Success - activity was created by the edge function. The recipients go
+        // back to who the next reply should reach, never blank: a blank To made
+        // the next Send silently do nothing.
         await applyStage(nextStage);
-        setBody(''); setSubject(''); setToEmail(''); setPendingFiles([]);
+        setBody(''); setSubject(''); setPendingFiles([]); resetRecipients();
         setSending(false);
         load();
         return;
@@ -379,7 +584,7 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
           return;
         }
         await applyStage(nextStage);
-        setBody(''); setToPhone('');
+        setBody(''); setToPhone(ticket?.customer_phone || ''); // a blank box made the next text do nothing
         setSending(false);
         load();
         return;
@@ -403,7 +608,9 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
       channel_metadata: {},
     };
 
-    if (channel === 'sms') {
+    if (channel === 'email' && recipients) {
+      record.channel_metadata = { to: headerList(recipients.to), cc: headerList(recipients.cc) || null };
+    } else if (channel === 'sms') {
       record.channel_metadata = { to_number: toPhone, from_number: 'system' };
     } else if (channel === 'call') {
       const durationParts = callDuration.split(':').map(Number);
@@ -434,10 +641,76 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
     }
 
     // Reset form
-    setBody(''); setSubject(''); setToEmail(''); setToPhone('');
+    setBody(''); setSubject(''); setToPhone(ticket?.customer_phone || '');
+    if (channel === 'email') resetRecipients();
     setCallDuration(''); setCallOutcome('connected');
     setSending(false);
     load();
+  };
+
+  // The Send/Add button and Cmd/Ctrl+Enter both come through here, so the
+  // keyboard follows exactly the same rules as the button.
+  const submitComposer = () => {
+    if (sending || (!body.trim() && channel !== 'call')) return;
+    if (subjectType === 'ticket' && (channel === 'email' || channel === 'sms')) {
+      const problem = channel === 'email' ? finalRecipients({ to: toList, cc: ccList, toPending, ccPending }).problem : null;
+      if (problem) { setEditTo(true); alert(problem); return; }
+      setAskStatus(true); // replies on a ticket always pick a status first
+    } else save();
+  };
+  const onComposerKeyDown = (e) => {
+    if (!isSubmitKey(e)) return; // Enter and Shift+Enter stay new lines
+    e.preventDefault();
+    setShowMentions(false);
+    submitComposer();
+  };
+
+  // ── Editing your own internal notes ──
+  const canEditNote = (a) => canWrite && a.type === 'note' && a.is_internal && a.actor_id === profile.id && !a.channel_metadata?.system;
+  const startEdit = (a) => { setEditingId(a.id); setEditDraft(a.body || ''); setEditError(''); };
+  const cancelEdit = () => { setEditingId(null); setEditDraft(''); setEditError(''); };
+  useEffect(() => {
+    const el = editRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [editingId]);
+  useEffect(() => {
+    const el = editRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight + 2, 340) + 'px';
+  }, [editDraft, editingId]);
+
+  const saveEdit = async (a) => {
+    const text = editDraft.trim();
+    if (!text || editSaving) return;
+    if (text === (a.body || '').trim()) { cancelEdit(); return; }
+    setEditSaving(true); setEditError('');
+    // Scoped to the author's own internal note, the same rule the database enforces.
+    const { data, error } = await supabase.from('crm_activities').update({ body: text })
+      .eq('id', a.id).eq('actor_id', profile.id).eq('type', 'note').eq('is_internal', true)
+      .select('id, body, edited_at');
+    setEditSaving(false);
+    const row = data?.[0];
+    if (error || !row) {
+      setEditError(error ? `Could not save the note: ${error.message}` : 'Could not save the note. Only the person who wrote it can edit it.');
+      return;
+    }
+    setActivities(prev => prev.map(x => (x.id === row.id ? { ...x, ...row } : x)));
+    cancelEdit();
+    // Notify only people newly @mentioned; everyone else heard about it the first time.
+    const before = mentionIds(a.body);
+    const added = [...mentionIds(row.body)].filter(id => !before.has(id));
+    if (added.length) {
+      await supabase.from('mentions').insert(added.map(userId => ({
+        activity_id: row.id, mentioned_user_id: userId, ticket_id: subjectType === 'ticket' ? subjectId : null,
+      })));
+    }
+  };
+  const onEditKeyDown = (e, a) => {
+    if (isSubmitKey(e)) { e.preventDefault(); saveEdit(a); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEdit(); }
   };
 
   const input = "w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember";
@@ -445,9 +718,15 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
   // Scroll-back aids: jump to oldest/latest + a floating "Latest" pill, and
   // sticky day dividers between messages from different days.
   const [showJump, setShowJump] = useState(false);
-  const scrollToBottom = () => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  const scrollToBottom = () => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); setNewCount(0); };
   const scrollToTop = () => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-  const onListScroll = (e) => { const el = e.target; setShowJump(el.scrollHeight - el.scrollTop - el.clientHeight > 260); };
+  const onListScroll = (e) => {
+    const el = e.target;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    nearBottomRef.current = gap < NEAR_BOTTOM_PX;
+    if (gap < NEAR_BOTTOM_PX) setNewCount(0); // reached the new messages by scrolling
+    setShowJump(gap > 260);
+  };
   const dayKeyOf = (ts) => new Date(ts).toDateString();
   const dayLabelOf = (ts) => {
     const d = new Date(ts), t = new Date(), y = new Date(); y.setDate(t.getDate() - 1);
@@ -508,9 +787,33 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
                       <span className="w-5 h-5 rounded-full bg-amber-200 text-amber-800 text-[9px] font-bold flex items-center justify-center">{getInitial(a.actor_id)}</span>
                       <span className="text-xs font-medium text-paper">{getName(a.actor_id)}</span>
                       {a.is_internal && <span className="text-[9px] text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded font-bold uppercase">Internal</span>}
+                      {a.edited_at && (
+                        <span className="text-[10px] text-dim italic" title={`Edited ${fmtStamp(a.edited_at)}`}>edited</span>
+                      )}
                       <span className="text-[10px] text-dim ml-auto">{timeAgo(a.occurred_at)}</span>
+                      {canEditNote(a) && editingId !== a.id && (
+                        <button onClick={() => startEdit(a)} title="Edit your note"
+                          className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-muted hover:text-paper hover:bg-card transition">Edit</button>
+                      )}
                     </div>
-                    <div className="text-sm text-paper leading-relaxed whitespace-pre-wrap">{renderBody(a.body)}</div>
+                    {editingId === a.id ? (
+                      <div>
+                        <textarea ref={editRef} rows={3} value={editDraft}
+                          onChange={e => setEditDraft(e.target.value)}
+                          onKeyDown={e => onEditKeyDown(e, a)}
+                          className={input + ' resize-none leading-relaxed'} />
+                        {editError && <div className="text-[11px] text-red-600 mt-1">{editError}</div>}
+                        <div className="flex items-center gap-2 mt-2">
+                          <button onClick={() => saveEdit(a)} disabled={editSaving || !editDraft.trim()}
+                            className="btn-glass px-3 py-1.5 rounded-xl text-xs disabled:opacity-50">{editSaving ? 'Saving...' : 'Save'}</button>
+                          <button onClick={cancelEdit} disabled={editSaving}
+                            className="px-3 py-1.5 rounded-xl text-xs text-muted border border-bdr hover:text-paper">Cancel</button>
+                          <span className="hidden lg:inline ml-auto text-[10px] text-dim">{SUBMIT_HINT} to save, Esc to cancel</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-paper leading-relaxed whitespace-pre-wrap">{renderBody(a.body)}</div>
+                    )}
                   </div>
                 )}
 
@@ -563,7 +866,11 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
                       <span className="text-[10px] text-dim ml-auto">{timeAgo(a.occurred_at)}</span>
                     </div>
                     {a.subject && <div className="text-xs font-medium text-paper mb-1">{a.subject}</div>}
-                    {a.channel_metadata?.to && <div className="text-[10px] text-muted mb-1">To: {a.channel_metadata.to}</div>}
+                    {a.type === 'email' && !isOutbound && a.channel_metadata?.reply_to
+                      && parseAddressList(a.channel_metadata.reply_to).some(r => !parseAddressList(a.channel_metadata.from).some(f => f.email === r.email))
+                      && <div className="text-[10px] text-amber-700 mb-1 break-words">Replies go to: {a.channel_metadata.reply_to}</div>}
+                    {a.channel_metadata?.to && <div className="text-[10px] text-muted mb-1 break-words">To: {a.channel_metadata.to}</div>}
+                    {a.type === 'email' && a.channel_metadata?.cc && <div className="text-[10px] text-muted -mt-0.5 mb-1 break-words">Cc: {a.channel_metadata.cc}</div>}
                     {(() => {
                       const isInboundEmail = a.type === 'email' && !isOutbound;
                       // HTML emails (invoices, receipts, newsletters) render as
@@ -602,8 +909,10 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
           );
         })}
       </div>
-      {showJump && (
-        <button onClick={scrollToBottom} className="absolute bottom-3 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-card text-ember-deep border border-bdr text-xs font-semibold shadow-md hover:bg-ember/10 transition">↓ Latest</button>
+      {(showJump || newCount > 0) && (
+        <button onClick={scrollToBottom} className="absolute bottom-3 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-card text-ember-deep border border-bdr text-xs font-semibold shadow-md hover:bg-ember/10 transition">
+          ↓ {newCount > 0 ? `${newCount} new ${newCount === 1 ? 'message' : 'messages'}` : 'Latest'}
+        </button>
       )}
       </div>
 
@@ -629,7 +938,7 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
               <button key={t.key} onClick={() => {
                 setChannel(t.key);
                 // Auto-fill customer contact from ticket
-                if (t.key === 'email' && customerEmail) setToEmail(customerEmail);
+                if (t.key === 'email' && !toList.length) resetRecipients();
                 if (t.key === 'sms' && ticket?.customer_phone) setToPhone(ticket.customer_phone);
               }}
                 className={`flex items-center gap-1 lg:gap-1.5 px-2 lg:px-3 py-1.5 text-[11px] lg:text-xs font-medium rounded-xl transition ${
@@ -687,16 +996,42 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
           {/* Email fields */}
           {channel === 'email' && (
             <div className="space-y-2 mb-2">
-              {/* Phones: the address is a single line you tap to change, rather
-                  than a full-width field competing with the message box. */}
-              <button type="button" onClick={() => setEditTo(v => !v)}
-                className="lg:hidden w-full flex items-center gap-2 px-3 py-1.5 rounded-xl bg-card border border-bdr text-left">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-dim shrink-0">To</span>
-                <span className="flex-1 min-w-0 truncate text-xs text-paper">{(toEmail || customerEmail) || 'Add an address'}</span>
-                <span className="text-[10px] text-muted shrink-0">{editTo ? 'Done' : 'Change'}</span>
-              </button>
-              <input className={`${input} ${editTo ? 'block' : 'hidden'} lg:block`} value={toEmail || customerEmail} onChange={e => setToEmail(e.target.value)}
-                placeholder="To email address" />
+              {newerEmailWaiting && (
+                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-paper">
+                  <span className="flex-1 min-w-0">A newer email came in while you were writing. This reply still goes to the people below.</span>
+                  <button type="button" onClick={() => resetRecipients()} className="shrink-0 font-semibold text-ember-deep hover:underline">Reply to newest</button>
+                </div>
+              )}
+              {/* Phones: the recipients are a single line you tap to change,
+                  rather than full-width fields competing with the message box.
+                  Reply | Reply all shows only when it would reach more people. */}
+              <div className={`${showReplyAll ? 'flex' : 'flex lg:hidden'} items-center gap-2`}>
+                <button type="button" onClick={() => setEditTo(v => !v)}
+                  className="lg:hidden flex-1 min-w-0 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-card border border-bdr text-left">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-dim shrink-0">To</span>
+                  <span className="flex-1 min-w-0 truncate text-xs text-paper">
+                    {toList.length ? toList.map(r => r.email).join(', ') : 'Add an address'}
+                    {ccList.length > 0 && <span className="text-muted">{`, Cc ${ccList.length}`}</span>}
+                  </span>
+                  <span className="text-[10px] text-muted shrink-0">{editTo ? 'Done' : 'Change'}</span>
+                </button>
+                {showReplyAll && (
+                  <div className="flex items-center gap-0.5 p-0.5 rounded-xl bg-card border border-bdr shrink-0" role="group" aria-label="Reply or reply all">
+                    {[['reply', 'Reply'], ['all', 'Reply all']].map(([k, l]) => (
+                      <button key={k} type="button" onClick={() => resetRecipients(k)} aria-pressed={replyMode === k}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${replyMode === k ? 'bg-ember text-white' : 'text-muted hover:text-paper'}`}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className={`${editTo ? 'block' : 'hidden'} lg:block space-y-2`}>
+                <AddressInput key={`to-${recipKey}`} label="To" value={toList}
+                  onChange={editRecipients(setToList)} onPendingChange={setToPending} placeholder="Add a recipient" />
+                <AddressInput key={`cc-${recipKey}`} label="Cc" value={ccList}
+                  onChange={editRecipients(setCcList)} onPendingChange={setCcPending} placeholder="Copy someone in (optional)" />
+              </div>
               {(sigPool.names || []).filter(Boolean).length > 0
                 ? <div className="hidden lg:block text-[10px] text-dim px-1">Signed by one of {(sigPool.names || []).filter(Boolean).length} support names, picked at random (Settings &rarr; Support).</div>
                 : mySignature && <div className="hidden lg:block text-[10px] text-dim px-1">Your signature will be added automatically (edit it under Account).</div>}
@@ -751,10 +1086,11 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
           <div className="relative">
             <textarea
               ref={bodyRef}
-              className={input + ' resize-none pr-20 lg:min-h-[110px]'}
+              className={input + ' resize-none pr-20 lg:pb-10 lg:min-h-[110px]'}
               rows={3}
               value={body}
               onChange={handleBodyChange}
+              onKeyDown={onComposerKeyDown}
               placeholder={
                 channel === 'note' ? 'Add a note... type @ to mention a team member'
                 : channel === 'email' ? 'Email body...'
@@ -778,23 +1114,23 @@ export default function ConversationTimeline({ subjectType, subjectId, profile, 
               </div>
             )}
 
-            {/* SMS character counter */}
-            {channel === 'sms' && (
-              <div className={`absolute bottom-2 right-16 text-[10px] font-mono ${body.length > 160 ? 'text-red-600' : 'text-dim'}`}>
-                {body.length}/160
-              </div>
-            )}
-
-            {/* Replies on a ticket force a status choice; notes/calls save directly. */}
-            <button
-              onClick={() => {
-                if (subjectType === 'ticket' && (channel === 'email' || channel === 'sms')) setAskStatus(v => !v);
-                else save();
-              }}
-              disabled={sending || (!body.trim() && channel !== 'call')}
-              className="absolute bottom-2 right-2 btn-glass px-4 py-2 lg:py-1.5 rounded-xl text-xs disabled:opacity-50">
-              {sending ? '...' : channel === 'note' ? 'Add' : channel === 'call' ? 'Log' : 'Send'}
-            </button>
+            <div className="absolute bottom-2 right-2 flex items-center gap-2">
+              {/* SMS character counter */}
+              {channel === 'sms' && (
+                <div className={`text-[10px] font-mono ${body.length > 160 ? 'text-red-600' : 'text-dim'}`}>
+                  {body.length}/160
+                </div>
+              )}
+              {/* Enter is a new line, so say how to send. Desktop only: phones have no such key. */}
+              <span className="hidden lg:inline text-[10px] text-dim">{SUBMIT_HINT}</span>
+              {/* Replies on a ticket force a status choice; notes/calls save directly. */}
+              <button
+                onClick={() => (askStatus ? setAskStatus(false) : submitComposer())}
+                disabled={sending || (!body.trim() && channel !== 'call')}
+                className="btn-glass px-4 py-2 lg:py-1.5 rounded-xl text-xs disabled:opacity-50">
+                {sending ? '...' : channel === 'note' ? 'Add' : channel === 'call' ? 'Log' : 'Send'}
+              </button>
+            </div>
             {/* Status picker: a popover on desktop, a bottom sheet on phones —
                 anchored to the button it was drawn off the bottom of the screen. */}
             {askStatus && (
@@ -829,4 +1165,8 @@ function timeAgo(ts) {
   if (d < 86400) return Math.floor(d / 3600) + 'h ago';
   if (d < 2592000) return Math.floor(d / 86400) + 'd ago';
   return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+}
+
+function fmtStamp(ts) {
+  return new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }

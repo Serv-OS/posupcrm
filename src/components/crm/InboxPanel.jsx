@@ -2,7 +2,11 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { sanitizeEmailHtml } from '../../lib/emailHtml';
 import { useGoogleConnection } from '../../lib/useGoogle';
-import { Mail, RefreshCw, Archive, Reply, Search, Link2, Plus, ExternalLink, Ticket, CheckSquare } from 'lucide-react';
+import { buildReply, hasOtherRecipients, headerList, parseAddressList } from '../../lib/replyRecipients';
+import { finalRecipients } from '../../lib/composerRecipients';
+import { isSubmitKey, SUBMIT_HINT } from '../../lib/submitKey';
+import AddressInput from './AddressInput.jsx';
+import { Mail, RefreshCw, Archive, Reply, ReplyAll, Search, Link2, Plus, ExternalLink, Ticket, CheckSquare } from 'lucide-react';
 
 const FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gmail-personal`;
 
@@ -236,6 +240,45 @@ function ThreadView({ conv, thread, loading, connectedEmail, profile, onNavigate
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState('');
 
+  // Reply / Reply all. Recipients come from the headers of the newest message,
+  // so everyone CC'd stays on the chain instead of only the last sender.
+  const [replyMode, setReplyMode] = useState('reply');
+  const [toList, setToList] = useState([]);
+  const [ccList, setCcList] = useState([]);
+  const [toPending, setToPending] = useState('');
+  const [ccPending, setCcPending] = useState('');
+  const [recipDirty, setRecipDirty] = useState(false); // edited by hand: leave them alone
+  const [recipKey, setRecipKey] = useState(0);         // remounts the chip inputs, clearing typed text
+  const anchorHeaders = useMemo(
+    () => ({ from: anchor?.from, to: anchor?.to, cc: anchor?.cc, replyTo: anchor?.replyTo }),
+    [anchor]);
+  const showReplyAll = useMemo(() => hasOtherRecipients(anchorHeaders, [connectedEmail]), [anchorHeaders, connectedEmail]);
+  const replyDefaults = (mode) => {
+    const r = buildReply(anchorHeaders, [connectedEmail], mode);
+    if (r.to.length) return r;
+    // A thread of only our own messages with no To left: fall back to the other party.
+    const me = (connectedEmail || '').toLowerCase();
+    const to = parseAddressList(correspondent.email).filter(a => a.email !== me);
+    return { to, cc: r.cc.filter(a => !to.some(t => t.email === a.email)) };
+  };
+  const fillRecipients = (mode) => {
+    const d = replyDefaults(mode);
+    setReplyMode(mode); setToList(d.to); setCcList(d.cc);
+    setToPending(''); setCcPending(''); setRecipDirty(false); setRecipKey(k => k + 1);
+  };
+  // The same button again closes the composer; the other one switches mode.
+  const openReply = (mode) => {
+    if (replyOpen && replyMode === mode) { setReplyOpen(false); return; }
+    fillRecipients(mode); setErr(''); setReplyOpen(true);
+  };
+  // The full thread can land after the composer opened on the list preview,
+  // which carries no Cc. Refresh the recipients unless they were edited.
+  useEffect(() => {
+    if (!replyOpen || recipDirty) return;
+    const d = replyDefaults(replyMode);
+    setToList(d.to); setCcList(d.cc);
+  }, [anchor?.id, anchor?.cc, anchor?.to]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [contact, setContact] = useState(undefined);
   const [linkMsg, setLinkMsg] = useState('');
   const [linking, setLinking] = useState(false);
@@ -245,6 +288,7 @@ function ThreadView({ conv, thread, loading, connectedEmail, profile, onNavigate
 
   useEffect(() => {
     setReplyOpen(false); setReplyBody(''); setSent(false); setErr(''); setLinkMsg(''); setCreated(null);
+    setReplyMode('reply'); setToList([]); setCcList([]); setToPending(''); setCcPending(''); setRecipDirty(false);
     setContact(undefined);
     if (correspondent.email) {
       supabase.from('contacts').select('id, first_name, last_name, email').ilike('email', correspondent.email).limit(1)
@@ -298,7 +342,11 @@ function ThreadView({ conv, thread, loading, connectedEmail, profile, onNavigate
   };
 
   const send = async () => {
-    if (!replyBody.trim()) return;
+    if (!replyBody.trim() || sending) return;
+    const recipients = finalRecipients({ to: toList, cc: ccList, toPending, ccPending });
+    if (recipients.problem) { setErr(recipients.problem); return; }
+    const toHeader = headerList(recipients.to);
+    const ccHeader = headerList(recipients.cc);
     setSending(true); setErr('');
     try {
       const sigText = signature ? `\n\n--\n${signature}` : '';
@@ -314,10 +362,13 @@ function ThreadView({ conv, thread, loading, connectedEmail, profile, onNavigate
           : '';
         html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1f2937;line-height:1.5">${nl2br(replyBody)}${sigHtml}</div>`;
       }
+      // References carry the whole chain (the anchor's own References plus its
+      // Message-ID) so every mail client threads the reply under the right message.
+      const references = [...new Set(`${anchor?.references || ''} ${anchor?.messageId || ''}`.split(/\s+/).filter(Boolean))].join(' ');
       await callFn({
-        action: 'send', to: correspondent.email,
+        action: 'send', to: toHeader, cc: ccHeader || undefined,
         subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
-        body: plain, html, threadId: conv.threadId, inReplyTo: anchor.messageId, references: anchor.messageId,
+        body: plain, html, threadId: conv.threadId, inReplyTo: anchor?.messageId, references: references || undefined,
       });
       setSent(true); setReplyOpen(false); setReplyBody('');
       if (contact?.id) {
@@ -326,6 +377,7 @@ function ThreadView({ conv, thread, loading, connectedEmail, profile, onNavigate
           subject_type: 'contact', subject_id: contact.id, contact_id: contact.id,
           actor_id: profile.id, direction: 'outbound', is_internal: false,
           occurred_at: new Date().toISOString(),
+          channel_metadata: { to: toHeader, cc: ccHeader || null },
         });
       }
       setTimeout(() => setSent(false), 2500);
@@ -380,7 +432,10 @@ function ThreadView({ conv, thread, loading, connectedEmail, profile, onNavigate
           </div>
         </div>
         <div className="flex items-center gap-2 mt-3 flex-wrap">
-          <button onClick={() => setReplyOpen(o => !o)} className="btn-glass px-3 py-1.5 rounded-xl text-sm font-semibold flex items-center gap-1.5"><Reply size={14} /> Reply</button>
+          <button onClick={() => openReply('reply')} aria-pressed={replyOpen && replyMode === 'reply'} className="btn-glass px-3 py-1.5 rounded-xl text-sm font-semibold flex items-center gap-1.5"><Reply size={14} /> Reply</button>
+          {showReplyAll && (
+            <button onClick={() => openReply('all')} aria-pressed={replyOpen && replyMode === 'all'} className="btn-glass px-3 py-1.5 rounded-xl text-sm font-semibold flex items-center gap-1.5"><ReplyAll size={14} /> Reply all</button>
+          )}
           <button onClick={onArchive} className="btn-ghost px-3 py-1.5 rounded-xl text-sm flex items-center gap-1.5"><Archive size={14} /> Archive</button>
 
           <span className="w-px h-5 bg-bdr mx-0.5" />
@@ -411,13 +466,22 @@ function ThreadView({ conv, thread, loading, connectedEmail, profile, onNavigate
       {/* Reply composer */}
       {replyOpen && (
         <div className="px-6 py-3 border-b border-bdr bg-card/50 shrink-0">
-          <div className="text-[11px] text-dim mb-1">Replying to {correspondent.email}{(signature || useLogo) && ' · your signature will be added'}</div>
+          <div className="text-[11px] text-dim mb-1">{replyMode === 'all' ? 'Reply all' : 'Reply'}{(signature || useLogo) && ' · your signature will be added'}</div>
+          <div className="space-y-1.5 mb-2">
+            <AddressInput key={`to-${recipKey}`} label="To" value={toList}
+              onChange={(l) => { setToList(l); setRecipDirty(true); }} onPendingChange={setToPending} placeholder="Add a recipient" />
+            <AddressInput key={`cc-${recipKey}`} label="Cc" value={ccList}
+              onChange={(l) => { setCcList(l); setRecipDirty(true); }} onPendingChange={setCcPending} placeholder="Copy someone in (optional)" />
+          </div>
           <textarea className={input + ' resize-none'} rows={4} autoFocus value={replyBody}
-            onChange={e => setReplyBody(e.target.value)} placeholder="Write your reply…" />
+            onChange={e => setReplyBody(e.target.value)}
+            onKeyDown={e => { if (isSubmitKey(e)) { e.preventDefault(); send(); } }}
+            placeholder="Write your reply…" />
           {err && <div className="text-xs text-red-600 mt-1">{err}</div>}
-          <div className="flex gap-2 mt-2">
+          <div className="flex items-center gap-2 mt-2">
             <button onClick={send} disabled={sending} className="btn-glass px-4 py-1.5 rounded-xl text-sm font-semibold disabled:opacity-50">{sending ? 'Sending…' : 'Send reply'}</button>
             <button onClick={() => setReplyOpen(false)} className="px-4 py-1.5 text-sm text-muted border border-bdr rounded-xl">Cancel</button>
+            <span className="hidden lg:inline ml-auto text-[11px] text-dim">{SUBMIT_HINT} to send</span>
           </div>
         </div>
       )}
