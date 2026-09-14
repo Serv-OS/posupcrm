@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { MobileTable, MobileDock, DockField, Mono, Segmented } from './ui.jsx';
 import { supabase } from '../../lib/supabase';
-import { Receipt, Plus, Repeat, X, Trash2, FileDown, Download, FileMinus } from 'lucide-react';
+import { Receipt, Plus, Repeat, X, Trash2, FileDown, Download, FileMinus, ArrowRightLeft } from 'lucide-react';
 import { useStickyState } from '../../lib/stickyState';
 import { downloadListPdf } from '../../lib/listPdf';
-import { amountPaid, balanceDue, creditAvailable, creditState, creditNoteLabel, creditNoteStatusLabel, creditUse, issuedTotal, overpaidNotOnCredit } from '../../lib/creditNotes';
+import { amountPaid, balanceDue, creditAvailable, creditState, creditNoteLabel, creditNoteStatusKind, creditNoteStatusLabel, creditUse, issuedTotal, overpaidNotOnCredit } from '../../lib/creditNotes';
+import ApplyCreditModal from './ApplyCreditModal.jsx';
 
 const SYMBOL = { GBP: '£', USD: '$', EUR: '€' };
 // The currency argument is optional: every existing `money(x)` call still reads
@@ -46,29 +47,25 @@ export const creditMark = (inv) => {
   if (Number(inv?.amount_allocated) > 0) marks.push('Credit applied');
   return marks.length ? marks.join(' · ') : null;
 };
-// Credit note chips, keyed by creditNoteStatusLabel.
+// Credit note chip colours, keyed by creditNoteStatusKind (the chip's words
+// come from creditNoteStatusLabel and carry amounts and invoice numbers).
 export const CN_BADGE = {
   Issued: 'bg-blue-100 text-blue-700', Available: 'bg-amber/15 text-amber-deep', 'Part used': 'bg-amber/15 text-amber-deep',
   Used: 'bg-purple-100 text-purple-700', Refunded: 'bg-emerald-100 text-emerald-700', Cancelled: 'bg-slate-100 text-slate-500',
 };
-// The same chips on the phone list.
+// The same chip colours on the phone list, keyed by creditNoteStatusKind.
 const CN_TONE = { Available: 'amber', 'Part used': 'amber', Used: 'uv', Refunded: 'primary', Cancelled: 'ink', Issued: 'uv' };
 /**
- * What a credit note's credit has gone on, in a few words, or null when there
- * is nothing to say: "£224.00 available", "£100.00 used, £124.00 left",
- * "Used £224.00", "Used £100.00, refunded £124.00" or "Refunded £224.00".
+ * The amounts behind a credit note's status, where its label does not already
+ * give them, or null: "£224.00 used" beside "Used on INV-1050", and
+ * "£224.00 refunded" or "£100.00 used, £124.00 refunded" beside "Refunded".
+ * A note with credit to use already says how much in its label.
  */
 export const creditUseText = (c) => {
   if (!c || c.status !== 'issued') return null;
-  const { used, refunded, left } = creditUse(c);
-  if (c.refund_status === 'owed') {
-    if (used > 0 || refunded > 0) {
-      return [used > 0 ? `${money(used)} used` : null, refunded > 0 ? `${money(refunded)} refunded` : null, `${money(left)} left`].filter(Boolean).join(', ');
-    }
-    return left > 0 ? `${money(left)} available` : null;
-  }
-  if (c.refund_status === 'allocated') return `Used ${money(used)}`;
-  if (c.refund_status === 'refunded') return used > 0 ? `Used ${money(used)}, refunded ${money(refunded)}` : `Refunded ${money(refunded)}`;
+  const { used, refunded } = creditUse(c);
+  if (c.refund_status === 'allocated') return used > 0 ? `${money(used)} used` : null;
+  if (c.refund_status === 'refunded') return [used > 0 ? `${money(used)} used` : null, `${money(refunded)} refunded`].filter(Boolean).join(', ');
   return null;
 };
 const FIELD_LABEL = { all: 'all fields', company: 'customer', location: 'location', number: 'invoice number', po: 'PO number' };
@@ -109,11 +106,18 @@ export default function InvoicesPanel({ profile, onNavigate }) {
   const [creditsReady, setCreditsReady] = useState(false);
   const [creditFilter, setCreditFilter] = useState('all');
   const [creditSearch, setCreditSearch] = useState('');
+  // Active credit applied from credit notes, to name the invoices a used note
+  // went to. allocReady is false before the credit allocations migration, and
+  // then no Apply button shows.
+  const [allocations, setAllocations] = useState([]);
+  const [allocReady, setAllocReady] = useState(false);
+  const [applying, setApplying] = useState(null);   // credit note being applied to an invoice
+  const [flash, setFlash] = useState('');
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [i, r, c, l, ct, pr, cn] = await Promise.all([
+    const [i, r, c, l, ct, pr, cn, al] = await Promise.all([
       supabase.from('invoices').select('*, company:companies(name), location:locations(name)').order('created_at', { ascending: false }),
       supabase.from('recurring_invoices').select('*, company:companies(name), location:locations(name)').order('created_at', { ascending: false }),
       supabase.from('companies').select('id, name').order('name'),
@@ -121,10 +125,12 @@ export default function InvoicesPanel({ profile, onNavigate }) {
       supabase.from('contacts').select('id, first_name, last_name, email').order('last_name'),
       supabase.from('products').select('id, name, description, default_price').eq('active', true).order('name'),
       supabase.from('credit_notes').select('*, invoice:invoices(invoice_number), company:companies(name), location:locations(name)').order('credit_number', { ascending: false }),
+      supabase.from('credit_allocations').select('id, credit_note_id, invoice_id, removed_at').is('removed_at', null),
     ]);
     setInvoices(i.data || []); setSchedules(r.data || []); setCompanies(c.data || []);
     setLocations(l.data || []); setContacts(ct.data || []); setProducts(pr.data || []);
     setCredits(cn.error ? [] : (cn.data || [])); setCreditsReady(!cn.error);
+    setAllocations(al.error ? [] : (al.data || []).filter(a => !a.removed_at)); setAllocReady(!cn.error && !al.error);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -277,6 +283,27 @@ export default function InvoicesPanel({ profile, onNavigate }) {
   const view = tab === 'credits' && !creditsReady ? 'invoices' : tab;
   // Notes with credit still to refund or apply to another invoice.
   const withCredit = credits.filter(c => creditAvailable(c) > 0);
+  // Each note's status in plain words: "Used on INV-1036" (it reduced its own
+  // invoice), "£224.00 to use", "Used on INV-1050" (every invoice its credit
+  // went to), Refunded or Cancelled.
+  const invoiceById = new Map(invoices.map(i => [i.id, i]));
+  const usedOnOf = (c) => allocations.filter(a => a.credit_note_id === c.id).map(a => invoiceById.get(a.invoice_id)).filter(Boolean);
+  const cnLabel = (c) => creditNoteStatusLabel(c, { usedOn: usedOnOf(c), money });
+  const canApply = (c) => canWrite && allocReady && creditAvailable(c) > 0;
+  const notify = (msg) => { setFlash(msg); setTimeout(() => setFlash(''), 3000); };
+  const creditApplied = (row, { note, invoice }) => {
+    setApplying(null);
+    load();
+    notify(`${money(row.amount)} from ${creditNoteLabel(note)} applied to INV-${invoice.invoice_number}`);
+  };
+  // Apply straight from the list, without opening the invoice first.
+  const applyButton = (c, size = 'sm') => (
+    <button type="button" onClick={(e) => { e.stopPropagation(); setApplying(c); }}
+      title={`Use ${money(creditAvailable(c))} of ${creditNoteLabel(c)} on another invoice`}
+      className={`rounded-lg font-semibold bg-purple-600 text-white hover:bg-purple-700 inline-flex items-center justify-center gap-1 ${size === 'lg' ? 'px-3 min-h-[34px] text-[13px]' : 'px-2.5 py-1.5 text-xs'}`}>
+      <ArrowRightLeft size={size === 'lg' ? 13 : 12} /> Apply
+    </button>
+  );
   // One search box over what each credit note row shows. The phone list has
   // the search only; the desk list adds the status filters.
   const cq = creditSearch.trim().toLowerCase();
@@ -286,12 +313,12 @@ export default function InvoicesPanel({ profile, onNavigate }) {
     const invNo = c.invoice?.invoice_number ? `INV-${c.invoice.invoice_number}` : '';
     return [creditNoteLabel(c), invNo, company, site, c.reason].some(v => String(v || '').toLowerCase().includes(cq));
   });
-  // Filters by the chip each row shows.
+  // Filters by the kind of status each row shows.
   const CREDIT_FILTERS = { available: ['Available', 'Part used'], used: ['Used'], refunded: ['Refunded'], cancelled: ['Cancelled'] };
   const shownCredits = CREDIT_FILTERS[creditFilter]
-    ? searchedCredits.filter(c => CREDIT_FILTERS[creditFilter].includes(creditNoteStatusLabel(c)))
+    ? searchedCredits.filter(c => CREDIT_FILTERS[creditFilter].includes(creditNoteStatusKind(c)))
     : searchedCredits;
-  const creditFilterName = { available: 'Credit available', used: 'Used', refunded: 'Refunded', cancelled: 'Cancelled' };
+  const creditFilterName = { available: 'Credit to use', used: 'Used on other invoices', refunded: 'Refunded', cancelled: 'Cancelled' };
   const statusText = (inv) => [invStatus(inv), creditMark(inv), overpaidOf(inv) > 0 ? 'Overpaid' : null].filter(Boolean).join(' · ');
 
   // What a schedule bills each run. Shared with the row below so the printed
@@ -324,7 +351,7 @@ export default function InvoicesPanel({ profile, onNavigate }) {
           columns: ['Credit note', 'Invoice', 'Customer', 'Date', 'Status', 'Total'],
           rows: shownCredits.map(c => [
             creditNoteLabel(c), c.invoice?.invoice_number ? `INV-${c.invoice.invoice_number}` : '', custName(c),
-            fmtD(c.issue_date), [creditNoteStatusLabel(c), creditUseText(c)].filter(Boolean).join(': '), money(c.total),
+            fmtD(c.issue_date), [cnLabel(c), creditUseText(c)].filter(Boolean).join(': '), money(c.total),
           ]),
           filters: [
             creditFilterName[creditFilter] || null,
@@ -351,7 +378,9 @@ export default function InvoicesPanel({ profile, onNavigate }) {
   const input = "px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper focus:outline-none focus:border-ember";
   // One definition for header, filters and rows so the columns cannot drift.
   const GRID = 'grid items-center gap-3 px-5 grid-cols-[96px_minmax(0,1.4fr)_minmax(0,1.4fr)_178px_108px_84px_34px]';
-  const CN_GRID = 'grid items-center gap-3 px-5 grid-cols-[84px_84px_minmax(0,2fr)_96px_108px_150px]';
+  // Apply sits under the status chip rather than in a column of its own: at
+  // 1024px wide (iPad landscape) one more column left Customer with no room.
+  const CN_GRID = 'grid items-center gap-3 px-5 grid-cols-[84px_84px_minmax(0,2fr)_96px_108px_170px]';
   const colInput = 'w-full px-2 py-1 bg-card border border-bdr rounded-lg text-[11px] text-paper placeholder-dim focus:outline-none focus:border-ember';
   // Safari draws an EMPTY date box with today's date greyed in, so an untouched
   // filter looks like it is already narrowing the list. Never let the browser's
@@ -366,8 +395,9 @@ export default function InvoicesPanel({ profile, onNavigate }) {
         <div className="px-[18px] pt-3 pb-2.5">
           <div className="font-display text-[23px] font-extrabold text-paper">{view === 'credits' ? 'Credit notes' : 'Invoices'}</div>
           {view === 'credits'
-            ? <Mono className="!tracking-[.18em] uppercase">{credits.length} credit note{credits.length === 1 ? '' : 's'} · {withCredit.length} with credit available</Mono>
+            ? <Mono className="!tracking-[.18em] uppercase">{credits.length} credit note{credits.length === 1 ? '' : 's'} · {withCredit.length} with credit to use</Mono>
             : <Mono className="!tracking-[.18em] uppercase">{filtered.length} shown · {invoices.filter(i => invStatus(i) === 'overdue').length} overdue</Mono>}
+          {flash && <div className="mt-1 text-[13px] text-emerald-600 font-semibold">✓ {flash}</div>}
           {creditsReady && (
             <div className="mt-2">
               <Segmented value={view === 'credits' ? 'credits' : 'invoices'} options={[['invoices', 'Invoices'], ['credits', 'Credit notes']]}
@@ -389,19 +419,19 @@ export default function InvoicesPanel({ profile, onNavigate }) {
                 { key: 'invoice', label: 'Invoice', mono: true, render: (c) => (c.invoice?.invoice_number ? `INV-${c.invoice.invoice_number}` : '—') },
                 { key: 'date', label: 'Date', render: (c) => fmtD(c.issue_date) },
                 { key: 'total', label: 'Total', align: 'right', mono: true, render: (c) => money(c.total) },
-                { key: 'status', label: 'Status', render: (c) => creditNoteStatusLabel(c) },
-                // Credit available: what is left to refund or apply to another invoice.
-                { key: 'left', label: 'Credit left', align: 'right', mono: true, render: (c) => (c.status === 'issued' && ['owed', 'allocated', 'refunded'].includes(c.refund_status) ? money(creditAvailable(c)) : null) },
+                { key: 'status', label: 'Status', render: (c) => cnLabel(c) },
+                // Credit to use: what is left to refund or apply to another invoice.
+                { key: 'left', label: 'Credit to use', align: 'right', mono: true, render: (c) => (c.status === 'issued' && ['owed', 'allocated', 'refunded'].includes(c.refund_status) ? money(creditAvailable(c)) : null) },
                 { key: 'site', label: 'Site', render: (c) => partiesOf(c).site || '—' },
+                { key: 'apply', label: 'Apply', render: (c) => (canApply(c) ? applyButton(c) : null) },
               ]}
               card={(c) => {
-                const label = creditNoteStatusLabel(c);
-                // In the chip, because the chosen columns replace meta on a card.
-                const left = creditAvailable(c);
-                const chip = { text: left > 0 ? `${label} · ${money(left)} left` : label, tone: CN_TONE[label] || 'uv' };
+                // The label already carries the credit to use, so the chip is just the label.
+                const chip = { text: cnLabel(c), tone: CN_TONE[creditNoteStatusKind(c)] || 'uv' };
                 return {
                   title: partiesOf(c).company || partiesOf(c).site || '—', amount: money(c.total), chip,
                   tone: creditAvailable(c) > 0 ? 'amber' : undefined,
+                  action: canApply(c) ? applyButton(c, 'lg') : null,
                   meta: [creditNoteLabel(c), c.invoice?.invoice_number ? `for INV-${c.invoice.invoice_number}` : null, fmtD(c.issue_date), creditUseText(c)].filter(Boolean).join(' · '),
                 };
               }} />
@@ -588,8 +618,9 @@ export default function InvoicesPanel({ profile, onNavigate }) {
                   <h3 className="text-[13px] font-bold text-paper">Credit notes</h3>
                   <span className="text-xs text-dim font-mono">({shownCredits.length})</span>
                   <span className="text-[11px] text-dim">Newest first. Open one to see its invoice.</span>
+                  {flash && <span className="text-xs text-emerald-600 font-semibold">✓ {flash}</span>}
                   <div className="ml-auto flex items-center gap-1">
-                    {[['all', 'All'], ['available', `Available${withCredit.length ? ` (${withCredit.length})` : ''}`], ['used', 'Used'], ['refunded', 'Refunded'], ['cancelled', 'Cancelled']].map(([k, lbl]) => (
+                    {[['all', 'All'], ['available', `To use${withCredit.length ? ` (${withCredit.length})` : ''}`], ['used', 'Used on other invoices'], ['refunded', 'Refunded'], ['cancelled', 'Cancelled']].map(([k, lbl]) => (
                       <button key={k} onClick={() => setCreditFilter(k)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${creditFilter === k ? 'bg-ember text-white' : 'text-muted hover:text-paper'}`}>{lbl}</button>
                     ))}
@@ -612,7 +643,8 @@ export default function InvoicesPanel({ profile, onNavigate }) {
                       {cq ? 'Nothing matches that search.' : creditFilter !== 'all' ? 'Nothing matches that filter.' : 'No credit notes yet. Raise one from a sent, viewed or paid invoice.'}
                     </div>
                   : shownCredits.map(c => {
-                    const label = creditNoteStatusLabel(c);
+                    const label = cnLabel(c);
+                    const kind = creditNoteStatusKind(c);
                     const cancelled = c.status === 'cancelled';
                     const { company, site } = partiesOf(c);
                     return (
@@ -627,9 +659,10 @@ export default function InvoicesPanel({ profile, onNavigate }) {
                         </div>
                         <div className="text-xs text-muted text-right">{fmtD(c.issue_date)}</div>
                         <div className={`text-sm font-semibold tabular-nums text-right ${cancelled ? 'line-through text-dim' : 'text-paper'}`}>{money(c.total)}</div>
-                        <div className="flex flex-col items-stretch gap-0.5 min-w-0">
-                          <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg text-center ${CN_BADGE[label]}`}>{label}</span>
-                          {creditUseText(c) && <span className="text-[9px] text-muted text-center truncate" title={creditUseText(c)}>{creditUseText(c)}</span>}
+                        <div className="flex flex-col items-center gap-1 min-w-0">
+                          <span className={`w-full text-[11px] font-semibold px-2 py-0.5 rounded-lg text-center leading-snug ${CN_BADGE[kind]}`}>{label}</span>
+                          {creditUseText(c) && <span className="w-full text-[10px] text-muted text-center truncate" title={creditUseText(c)}>{creditUseText(c)}</span>}
+                          {canApply(c) && applyButton(c)}
                         </div>
                       </div>
                     );
@@ -665,6 +698,7 @@ export default function InvoicesPanel({ profile, onNavigate }) {
         </div>
       </div>
 
+      {applying && <ApplyCreditModal note={applying} onClose={() => setApplying(null)} onApplied={creditApplied} />}
       {editSched && <ScheduleModal schedule={editSched} companies={companies} locations={locations} contacts={contacts}
         products={products} profile={profile} onClose={() => setEditSched(null)} onSaved={() => { setEditSched(null); load(); }} />}
     </div>

@@ -10,7 +10,7 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import {
-  amountPaid, balanceDue, creditableLeft, creditNoteLabel, creditNoteStatusLabel, creditState, creditTotals, creditUse, settledAmount,
+  amountPaid, balanceDue, creditableLeft, creditNoteLabel, creditNoteStatusKind, creditNoteStatusLabel, creditState, creditTotals, creditUse, settledAmount,
 } from './creditNotes'
 
 const hexToRgb = (hex) => {
@@ -105,10 +105,13 @@ async function renderDoc({
   if (pill) {
     ry += 4
     doc.setFont('helvetica', 'bold').setFontSize(9)
-    // 78pt fits PAID and OVERDUE; CREDIT AVAILABLE and CANCELLED need more.
-    const pw = Math.max(78, doc.getTextWidth(pill.t) + 20)
+    // 78pt fits PAID and OVERDUE; USED ON INV-1050 and CANCELLED need more.
+    // Words too long for the space right of the seller's details (credit used
+    // on several invoices) give way to pill.short when there is one.
+    const text = pill.short && doc.getTextWidth(pill.t) + 20 > 190 ? pill.short : pill.t
+    const pw = Math.max(78, doc.getTextWidth(text) + 20)
     doc.setFillColor(...pill.bg).roundedRect(W - M - pw, ry - 11, pw, 18, 4, 4, 'F')
-    doc.setTextColor(...pill.fg).text(pill.t, W - M - pw / 2, ry + 1, { align: 'center' })
+    doc.setTextColor(...pill.fg).text(text, W - M - pw / 2, ry + 1, { align: 'center' })
     ry += 16
   }
 
@@ -294,6 +297,11 @@ export async function buildInvoiceDoc({ inv = {}, lines = [], totals = {}, alloc
     rows.push({ label: 'Paid', value: paidRaw, color: [6, 120, 70] })
     const bal = (Number(total) - Number(paidRaw))
     if (Math.abs(bal) > 0.005) rows.push({ label: 'Balance due', value: bal, bold: true })
+  } else if (status !== 'draft' && status !== 'void' && paid > 0) {
+    // Part paid with no credit (a payment recorded, or a deposit): what came in
+    // and what is left, as the public invoice page and the email show it.
+    rows.push({ label: 'Paid', value: paid, color: [6, 120, 70], minus: true })
+    rows.push({ label: 'Balance due', value: balance, bold: true })
   }
 
   return renderDoc({
@@ -355,16 +363,22 @@ export async function buildCreditNoteDoc({ note = {}, lines, invoice = {}, alloc
   const sums = note.total != null ? null : creditTotals(rows)
   const [ar, ag, ab] = hexToRgb(seller.accent)
 
-  // The chip follows the staff screens' words (creditNoteStatusLabel):
-  // credit available, part used, used or refunded.
-  const status = creditNoteStatusLabel(note)
+  // The chip follows the staff screens' words (creditNoteStatusLabel: "£224.00
+  // to use", "Used on INV-1050"), coloured by its kind. A note that only
+  // reduced its own invoice has none; the Invoice line already names it.
+  const kind = creditNoteStatusKind(note)
+  const words = creditNoteStatusLabel(note, {
+    invoiceNumber: invNumber,
+    usedOn: activeAllocations(allocations).map((a) => ({ invoice_number: invLabelOf(a) || null })),
+    money: moneyFn(fmt),
+  }).toUpperCase()
   const amber = { bg: [254, 243, 199], fg: [146, 64, 14] }
   const green = { bg: [209, 250, 229], fg: [6, 95, 70] }
   const pill = cancelled ? { t: 'CANCELLED', bg: [241, 245, 249], fg: [100, 116, 139] }
-    : status === 'Available' ? { t: 'CREDIT AVAILABLE', ...amber }
-      : status === 'Part used' ? { t: 'PART USED', ...amber }
-        : status === 'Used' ? { t: 'USED', ...green }
-          : status === 'Refunded' ? { t: 'REFUNDED', ...green }
+    : kind === 'Available' ? { t: words, short: 'CREDIT TO USE', ...amber }
+      : kind === 'Part used' ? { t: words, short: 'PART USED', ...amber }
+        : kind === 'Used' ? { t: words, short: 'USED', ...green }
+          : kind === 'Refunded' ? { t: words, short: 'REFUNDED', ...green }
             : null
 
   const totals = [

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Receipt, Repeat } from 'lucide-react';
 import { money, invStatus, INV_BADGE, creditMark, CN_BADGE } from './InvoicesPanel.jsx';
-import { balanceDue, companyCreditAvailable, creditNoteLabel, creditNoteStatusLabel } from '../../lib/creditNotes';
+import { balanceDue, companyCreditAvailable, creditNoteLabel, creditNoteStatusKind, creditNoteStatusLabel } from '../../lib/creditNotes';
 
 // Invoices associated with a record. Pass exactly one of companyId /
 // locationId / contactId. "+ New" raises a draft pre-associated to the record.
@@ -10,6 +10,8 @@ export default function InvoicesCard({ companyId, locationId, contactId, profile
   const [invoices, setInvoices] = useState([]);
   const [recurringCount, setRecurringCount] = useState(0);
   const [credits, setCredits] = useState([]);   // credit notes on the invoices shown
+  // note id -> the invoices its credit was applied to, for "Used on INV-1050".
+  const [usedOn, setUsedOn] = useState({});
   // Credit available across ALL this record's credit notes, not just those on
   // the invoices shown: what they can have refunded or use on an invoice.
   const [creditLeft, setCreditLeft] = useState(0);
@@ -27,7 +29,7 @@ export default function InvoicesCard({ companyId, locationId, contactId, profile
         // Fetched by invoice, not by this record: a credit note sits under the
         // invoice it was raised from. No table yet (migration not applied)
         // just means no credit notes to show.
-        if (!rows.length) { setCredits([]); return; }
+        if (!rows.length) { setCredits([]); setUsedOn({}); return; }
         const ids = rows.map(i => i.id);
         // amount_allocated tells Available from Part used. Before the credit
         // allocations migration it is not there, so the notes are read without it.
@@ -37,7 +39,19 @@ export default function InvoicesCard({ companyId, locationId, contactId, profile
           cn = await supabase.from('credit_notes').select('id, credit_number, invoice_id, total, status, refund_status, issue_date')
             .in('invoice_id', ids).order('credit_number');
         }
-        setCredits(cn.error ? [] : (cn.data || []));
+        const notes = cn.error ? [] : (cn.data || []);
+        setCredits(notes);
+        // Only a note whose credit went to other invoices needs their numbers.
+        const usedIds = notes.filter(c => c.status === 'issued' && c.refund_status === 'allocated').map(c => c.id);
+        if (!usedIds.length) { setUsedOn({}); return; }
+        const al = await supabase.from('credit_allocations').select('credit_note_id, invoice_id, removed_at').in('credit_note_id', usedIds).is('removed_at', null);
+        const active = al.error ? [] : (al.data || []).filter(a => !a.removed_at);
+        const targetIds = [...new Set(active.map(a => a.invoice_id))];
+        const inv = targetIds.length ? await supabase.from('invoices').select('id, invoice_number').in('id', targetIds) : { data: [] };
+        const numberOf = new Map((inv.data || []).map(x => [x.id, x.invoice_number]));
+        const map = {};
+        active.forEach(a => { if (numberOf.has(a.invoice_id)) (map[a.credit_note_id] = map[a.credit_note_id] || []).push(numberOf.get(a.invoice_id)); });
+        setUsedOn(map);
       });
     // Credit notes copy the company, site and contact from their invoice, so
     // they can be read by the same field. Nothing shows before the migration.
@@ -89,13 +103,14 @@ export default function InvoicesCard({ companyId, locationId, contactId, profile
                 <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 ${INV_BADGE[st]}`}>{st}</span>
               </div>
               {notes.map(c => {
-                const chip = creditNoteStatusLabel(c);
+                // Plain words ("Used on INV-1036", "£224.00 to use"); the colour keys on the kind.
+                const chip = creditNoteStatusLabel(c, { invoiceNumber: inv.invoice_number, usedOn: usedOn[c.id], money });
                 const cancelled = c.status === 'cancelled';
                 return (
-                  <div key={c.id} className="pl-8 pr-4 pb-2 -mt-1 flex items-center gap-2">
+                  <div key={c.id} className="pl-8 pr-4 pb-2 -mt-1 flex items-center gap-2 min-w-0">
                     <span className={`font-mono text-[10px] text-dim shrink-0 ${cancelled ? 'line-through' : ''}`}>{creditNoteLabel(c)}</span>
                     <span className={`text-xs tabular-nums ml-auto shrink-0 ${cancelled ? 'line-through text-dim' : 'text-muted'}`}>-{money(c.total)}</span>
-                    <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded shrink-0 ${CN_BADGE[chip]}`}>{chip}</span>
+                    <span title={chip} className={`text-[10px] font-semibold px-1.5 py-0.5 rounded min-w-0 truncate ${CN_BADGE[creditNoteStatusKind(c)]}`}>{chip}</span>
                   </div>
                 );
               })}
@@ -109,7 +124,7 @@ export default function InvoicesCard({ companyId, locationId, contactId, profile
         )}
         {creditLeft > 0 && (
           <div className="px-4 py-2 text-[11px] text-amber-deep flex justify-between" title="Credit from credit notes that can be refunded or used on one of their invoices">
-            <span>Credit available</span><span className="font-semibold tabular-nums">{money(creditLeft)}</span>
+            <span>Credit to use</span><span className="font-semibold tabular-nums">{money(creditLeft)}</span>
           </div>
         )}
       </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { creditNoteLabel, creditNoteStatusLabel, creditUse } from '../lib/creditNotes';
+import { creditNoteLabel, creditNoteStatusKind, creditNoteStatusLabel, creditUse } from '../lib/creditNotes';
 import { creditNotePdf } from '../lib/invoicePdf';
 
 // Public hosted credit note page (/c/<token>), the link in the credit note
@@ -59,7 +59,10 @@ export default function PublicCreditNote({ token }) {
   // columns behind it exist, a refunded note reads as all of it refunded.
   const appliedTo = (data.applied_to || []).filter((a) => Number(a?.amount) > 0);
   const use = creditUse(note);
-  const status = creditNoteStatusLabel(note);
+  // The status in the words the staff screens use ("£224.00 to use", "Used on
+  // INV-1050"), coloured by its kind.
+  const statusKind = creditNoteStatusKind(note);
+  const status = creditNoteStatusLabel(note, { invoiceNumber: invNumber, usedOn: data.applied_to, money });
   const invLabel = (n) => (typeof n === 'string' && /^INV-/i.test(n) ? n : `INV-${n}`);
   const refundedHow = [
     note.refunded_at ? `on ${fmtDate(note.refunded_at)}` : '',
@@ -108,13 +111,11 @@ export default function PublicCreditNote({ token }) {
             <div className="text-xs text-slate-500 mt-1">Issued {fmtDate(note.issue_date)}</div>
             {invNumber != null && invNumber !== '' && <div className="text-xs text-slate-500">For invoice INV-{invNumber}</div>}
             <div className="mt-2">
-              {status === 'Available'
-                ? <Badge bg="#fef3c7" color="#92400e">Credit available</Badge>
-                : status === 'Part used'
-                  ? <Badge bg="#fef3c7" color="#92400e">Part used</Badge>
-                  : status === 'Used' || status === 'Refunded'
-                    ? <Badge bg="#d1fae5" color="#065f46">{status}</Badge>
-                    : <Badge bg="#e0e7ff" color="#3730a3">Issued</Badge>}
+              {statusKind === 'Available' || statusKind === 'Part used'
+                ? <Badge bg="#fef3c7" color="#92400e">{status}</Badge>
+                : statusKind === 'Used' || statusKind === 'Refunded'
+                  ? <Badge bg="#d1fae5" color="#065f46">{status}</Badge>
+                  : <Badge bg="#e0e7ff" color="#3730a3">{status}</Badge>}
             </div>
           </div>
         </div>

@@ -4,11 +4,12 @@ import { ArrowLeft, Send, Link2, Trash2, Plus, Check, Ban, Repeat, FileDown, Fil
 import { money, invStatus, INV_BADGE, creditMark, CN_BADGE } from './InvoicesPanel.jsx';
 import { downloadInvoicePdf } from '../../lib/invoicePdf';
 import {
-  ALLOCATABLE_STATUSES, amountPaid, balanceDue, canRaiseCredit, companyCreditAvailable, creditAvailable, creditState,
-  creditNoteLabel, creditNoteStatusLabel, creditUse, markPaidAmount, overpaidNotOnCredit, refundProblem,
+  ALLOCATABLE_STATUSES, CREDITABLE_STATUSES, amountPaid, balanceDue, canRaiseCredit, companyCreditAvailable, creditAvailable, creditState,
+  creditNoteLabel, creditNoteStatusKind, creditNoteStatusLabel, creditUse, overpaidAdvice, overpaidNotOnCredit, refundProblem,
 } from '../../lib/creditNotes';
 import CreditNoteModal, { CancelCreditModal, RefundCreditModal, creditErrorText, downloadCreditNotePdf, loadCreditBasis, sendCreditNoteEmail } from './CreditNoteModal.jsx';
 import ApplyCreditModal, { RemoveCreditModal, loadCreditToUse, loadInvoiceAllocations, sameCustomer } from './ApplyCreditModal.jsx';
+import AmountReceivedModal, { loadPaymentHistory } from './AmountReceivedModal.jsx';
 
 const FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 
@@ -44,6 +45,11 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
   const [creditToUse, setCreditToUse] = useState([]);
   const [applying, setApplying] = useState(null);    // { note } or { invoice, preselectId } while the apply screen is open
   const [removing, setRemoving] = useState(null);    // allocation row being removed
+  // Every change to the amount received (Change and Mark paid), oldest first.
+  // ready is false until the amount received migration is applied, and then
+  // Change is not offered.
+  const [history, setHistory] = useState({ ready: false, rows: [] });
+  const [receiving, setReceiving] = useState(null);  // 'correction' (Change) or 'payment' (Mark paid) while the sheet is open
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
   const isOwner = profile.role === 'owner';
 
@@ -52,6 +58,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
     setAllocs(a);
     setCreditToUse(a.ready ? (await loadCreditToUse()).filter(c => c.invoice_id !== invoiceId) : []);
   }, [invoiceId]);
+  const loadHistory = useCallback(async () => { setHistory(await loadPaymentHistory(invoiceId)); }, [invoiceId]);
 
   const load = useCallback(async () => {
     const [i, li, c, l, ct, st, pr, sk, cn] = await Promise.all([
@@ -66,6 +73,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
       supabase.from('credit_notes').select('*').eq('invoice_id', invoiceId).order('credit_number'),
     ]);
     setInv(i.data);
+    loadHistory();
     setCreditNotes(cn.error ? [] : (cn.data || [])); setCreditsReady(!cn.error);
     if (cn.error) { setAllocs({ ready: false, into: [], from: [] }); setCreditToUse([]); }
     else loadAllocs((cn.data || []).map(c => c.id));
@@ -77,14 +85,14 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
     setStockCounts(counts);
     setGlobalTerms(st.data?.invoice_terms || '');
     setSeller(st.data || {});
-  }, [invoiceId, loadAllocs]);
+  }, [invoiceId, loadAllocs, loadHistory]);
   useEffect(() => { load(); }, [load]);
 
-  // After a credit note is issued, emailed, refunded or cancelled, or credit is
-  // applied or removed, only the credit lists and the invoice's credited and
-  // applied figures change, plus the status and payment when the invoice is
-  // settled or reopened. So unsaved edits on the page are kept (load() would
-  // put every field back as saved).
+  // After a credit note is issued, emailed, refunded or cancelled, credit is
+  // applied or removed, or the amount received changes, only the credit lists
+  // and the invoice's credited, applied and received figures change, plus the
+  // status when the invoice is settled or reopened. So unsaved edits on the
+  // page are kept (load() would put every field back as saved).
   const refreshCredits = useCallback(async () => {
     const [cn, i] = await Promise.all([
       supabase.from('credit_notes').select('*').eq('invoice_id', invoiceId).order('credit_number'),
@@ -126,6 +134,9 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
   // Taken beyond what the invoice asks for and not on any credit note as a
   // refund (a card payment that landed after a credit, or paid twice).
   const overpaid = creditsReady ? overpaidNotOnCredit(inv, creditNotes) : 0;
+  // The cash the customer has paid, on every invoice that has gone out.
+  const showReceived = CREDITABLE_STATUSES.includes(inv.status);
+  const canChangeReceived = canWrite && history.ready && showReceived;
   const showBalance = !['draft', 'void'].includes(inv.status) && (creditState(inv) !== 'none' || appliedTotal > 0 || (paidSoFar > 0 && balance > 0));
   // Credit from other invoices' notes that could come off this one: the banner
   // names the same customer's; others are one tap further, on the apply screen.
@@ -143,15 +154,18 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
   const subtotal = lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_price) || 0), 0);
   const taxAmount = lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_price) || 0) * (Number(l.tax_rate) || 0) / 100, 0);
   const total = subtotal + taxAmount;
+  // Mark paid records a payment through the same database function as Change,
+  // which takes a sent or viewed invoice with something left to pay (a draft is
+  // sent first). Until the lines are locked the total is the one on screen,
+  // which is saved before the sheet opens.
+  const canMarkPaid = ALLOCATABLE_STATUSES.includes(inv.status) && balanceDue(linesLocked ? inv : { ...inv, total }) > 0;
 
   const notify = (msg) => { setFlash(msg); setTimeout(() => setFlash(''), 2500); };
 
-  // guard.updatedAt (Mark paid): the write only lands if the invoice is still
-  // exactly as it was read, so nothing recorded by a colleague or by Stripe
-  // while a confirm box was open is written over. When it has changed nothing
-  // is saved and save() returns null (false for any other failure, true once
-  // saved), so the caller can read the invoice again and ask again.
-  const save = async (extra = {}, guard = null) => {
+  // Resolves to true once saved, false when the save failed. The amount
+  // received and the paid status are never written here: Mark paid and Change
+  // go through set_invoice_amount_received (AmountReceivedModal).
+  const save = async (extra = {}) => {
     setSaving(true);
     // Checked again at the moment of saving, not just when the screen loaded:
     // someone else may have issued a credit note on this invoice since.
@@ -172,15 +186,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
       terms: (inv.terms || '').trim() || null, notes: (inv.notes || '').trim() || null,
       po_number: (inv.po_number || '').trim() || null, ...extra,
     };
-    let write = supabase.from('invoices').update(patch).eq('id', invoiceId);
-    if (guard?.updatedAt) write = write.eq('updated_at', guard.updatedAt).select('id');
-    const written = await write;
-    let { error } = written;
-    if (!error && guard?.updatedAt && !(written.data || []).length) {
-      setSaving(false);
-      refreshCredits();
-      return null;
-    }
+    let { error } = await supabase.from('invoices').update(patch).eq('id', invoiceId);
     if (!error && !keepLines) {
       ({ error } = await supabase.from('invoice_line_items').delete().eq('invoice_id', invoiceId));
       const clean = lines.filter(l => (l.name || '').trim());
@@ -268,31 +274,35 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
     setPdfBusy(false);
   };
 
-  const markPaid = async (changed = false) => {
-    // What came in is the balance due after payments, credit notes and credit
-    // applied, on top of the cash already taken: credit is never recorded as
-    // cash. The figures are read fresh, as someone may have applied credit
-    // since this page loaded. With nothing credited the total is the one on
-    // screen, which save() is about to store; once credited it cannot change.
-    const { data: fresh } = await supabase.from('invoices').select('*').eq('id', invoiceId).single();
-    if (fresh?.status === 'paid') { alert('This invoice is already marked paid.'); refreshCredits(); return; }
-    const figures = fresh
-      ? { ...inv, status: fresh.status, amount_paid: fresh.amount_paid, amount_credited: fresh.amount_credited, amount_allocated: fresh.amount_allocated }
-      : inv;
-    const settledByCredit = creditLocked || Number(figures.amount_credited) > 0 || Number(figures.amount_allocated) > 0;
-    const basis = settledByCredit ? { ...figures, total: fresh?.total ?? inv.total } : { ...figures, total };
-    const due = balanceDue(basis);
-    const received = markPaidAmount(basis);
-    const question = settledByCredit || amountPaid(basis) > 0
-      ? `Mark this invoice as paid? This records the balance of ${money(due)} as received outside Stripe.`
-      : 'Mark this invoice as paid (received outside Stripe)?';
-    if (!confirm(`${changed ? `INV-${inv.invoice_number} changed while the last box was open, so nothing was saved and the figures are read again.\n\n` : ''}${question}`)) return;
-    // Written only if the invoice is still as read above: credit applied or a
-    // payment recorded while the box was open would otherwise be counted as
-    // cash on top. If it changed, it is read again and the question asked again.
-    const saved = await save({ status: 'paid', paid_at: new Date().toISOString(), amount_paid: received }, { updatedAt: fresh?.updated_at });
-    if (saved === null) { markPaid(true); return; }
-    if (saved) notify('Marked paid');
+  // ── The amount received ──
+  // Mark paid ('payment') and Change ('correction') open the same sheet, which
+  // asks how much came in and saves through set_invoice_amount_received. It
+  // never assumes the balance was paid: on 14 Sep a Mark paid pressed after a
+  // credit note recorded £1,120 when the customer had sent £1,344. Unsaved
+  // edits are saved first, as for a credit note, because the sheet and the
+  // database work from the invoice as saved and a paid invoice is locked.
+  // A payment is only for an invoice still to be paid: a colleague may have
+  // recorded the same bank transfer while this screen showed Mark paid, so the
+  // status is read again first (the database refuses it too).
+  const openReceived = async (mode) => {
+    if (!locked && !(await save())) return;
+    if (mode === 'payment') {
+      const { data: fresh } = await supabase.from('invoices').select('status').eq('id', invoiceId).single();
+      if (fresh?.status === 'paid') {
+        alert(`INV-${inv.invoice_number} has already been paid. Use Change to correct the amount received.`);
+        refreshCredits();
+        return;
+      }
+    }
+    setReceiving(mode);
+  };
+  const receivedSaved = (result, { mode, payment }) => {
+    setReceiving(null);
+    refreshCredits();
+    loadHistory();
+    const name = `INV-${inv.invoice_number}`;
+    const after = result?.status === 'paid' ? `${name} is paid` : `${money(result?.balance_due)} left to pay`;
+    notify(mode === 'payment' ? `${money(payment)} recorded, ${after}` : `Amount received is now ${money(result?.amount_paid)}, ${after}`);
   };
   const voidInvoice = async () => {
     if (issuedCredits.length) { alert('This invoice has credit notes issued against it. Cancel them before voiding it.'); return; }
@@ -378,6 +388,12 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
     const date = new Date(String(d).length <= 10 ? `${d}T00:00:00` : d);
     return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   };
+  // With the time, for the payment history: a correction often follows a payment the same day.
+  const whenOf = (d) => {
+    const date = d ? new Date(d) : null;
+    return !date || Number.isNaN(date.getTime()) ? ''
+      : date.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
 
   const input = "w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember disabled:opacity-60";
   const cell = "px-2 py-1.5 bg-card border border-bdr rounded-lg text-sm text-paper placeholder-dim focus:outline-none focus:border-ember disabled:opacity-60";
@@ -403,7 +419,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
             <button onClick={downloadPdf} disabled={pdfBusy} title="Download this invoice as a PDF" className="btn-ghost px-3 py-2 rounded-xl text-sm flex items-center gap-1.5 disabled:opacity-50"><FileDown size={14} /> {pdfBusy ? 'Preparing…' : 'PDF'}</button>
             {canCredit && <button onClick={openCredit} disabled={saving} title="Raise a credit note against this invoice" className="btn-ghost px-3 py-2 rounded-xl text-sm flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"><FileMinus size={14} /> Raise credit note</button>}
             {!locked && <button onClick={sendInvoice} disabled={sending} className="btn-glass px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50"><Send size={14} /> {sending ? 'Sending…' : inv.sent_at ? 'Resend' : 'Send'}</button>}
-            {!locked && !(creditLocked && balance === 0) && <button onClick={() => markPaid()} className="px-3 py-2 rounded-xl text-sm font-semibold bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 flex items-center gap-1.5"><Check size={14} /> Mark paid</button>}
+            {canMarkPaid && <button onClick={() => openReceived('payment')} disabled={saving} title="Record money that came in outside the card payment link" className="px-3 py-2 rounded-xl text-sm font-semibold bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 flex items-center gap-1.5 disabled:opacity-50"><Check size={14} /> Mark paid</button>}
             {!locked && <button onClick={voidInvoice} title="Void" className="btn-ghost px-3 py-2 rounded-xl text-sm flex items-center gap-1.5 text-muted"><Ban size={14} /></button>}
             {isOwner && <button onClick={del} title="Delete" className="px-3 py-2 text-red-600 border border-red-200 rounded-xl hover:bg-red-50"><Trash2 size={14} /></button>}
           </div>
@@ -509,9 +525,22 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                 <div className="flex justify-between text-muted"><span>Subtotal</span><span className="tabular-nums">{money(subtotal)}</span></div>
                 <div className="flex justify-between text-muted"><span>VAT (per line)</span><span className="tabular-nums">{money(taxAmount)}</span></div>
                 <div className="flex justify-between text-base font-bold text-paper pt-1.5 border-t border-bdr"><span>Total</span><span className="tabular-nums">{money(total)}</span></div>
-                {/* Paid is the cash taken. A paid invoice settled only by credit took none, so it shows no Paid line. */}
-                {(inv.status === 'paid' ? (paidSoFar > 0 || appliedTotal === 0) : showBalance && paidSoFar > 0) && (
-                  <div className="flex justify-between text-emerald-600 font-semibold"><span>Paid</span><span className="tabular-nums">{money(paidSoFar)}</span></div>
+                {/* The cash the customer has paid (credit applied is not cash).
+                    Change puts it right when what was recorded is wrong. */}
+                {showReceived && (
+                  <div className={`flex justify-between items-baseline gap-2 font-semibold ${paidSoFar > 0 ? 'text-emerald-600' : 'text-muted'}`}>
+                    <span>Amount received</span>
+                    <span className="flex items-baseline gap-1.5 shrink-0">
+                      <span className="tabular-nums">{money(paidSoFar)}</span>
+                      {canChangeReceived && (
+                        <>
+                          <span className="text-dim font-normal" aria-hidden="true">·</span>
+                          <button type="button" onClick={() => openReceived('correction')} disabled={saving}
+                            className="text-xs text-ember hover:text-ember-deep font-medium px-1 py-1 -my-1 -mr-1 disabled:opacity-50">Change</button>
+                        </>
+                      )}
+                    </span>
+                  </div>
                 )}
                 {creditState(inv) !== 'none' && <div className="flex justify-between text-purple-700 font-semibold"><span>Credited</span><span className="tabular-nums">-{money(inv.amount_credited)}</span></div>}
                 {activeInto.length > 0
@@ -520,19 +549,47 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                   ))
                   : appliedTotal > 0 && <div className="flex justify-between text-purple-700 font-semibold"><span>Credit applied</span><span className="tabular-nums">-{money(appliedTotal)}</span></div>}
                 {showBalance && <div className="flex justify-between text-base font-bold text-paper pt-1.5 border-t border-bdr"><span>Balance due</span><span className="tabular-nums">{money(balance)}</span></div>}
-                {creditHeld > 0 && <div className="flex justify-between text-amber-deep font-semibold"><span>Credit available</span><span className="tabular-nums">{money(creditHeld)}</span></div>}
+                {creditHeld > 0 && <div className="flex justify-between text-amber-deep font-semibold"><span>Credit to use</span><span className="tabular-nums">{money(creditHeld)}</span></div>}
                 {canWrite && canTakeCredit && ownCreditSum === 0 && otherCredit && (
                   <button onClick={() => openUseCredit()} disabled={saving} className="w-full text-right text-xs text-ember hover:text-ember-deep font-medium disabled:opacity-50">Use credit from another customer's credit note</button>
                 )}
                 {overpaid > 0 && (
                   <div className="text-amber-deep">
                     <div className="flex justify-between font-semibold"><span>Overpaid</span><span className="tabular-nums">{money(overpaid)}</span></div>
-                    <div className="text-[11px]">More was paid than this invoice asks for and no credit note shows it as a refund owed. Refund it to the customer.</div>
+                    <div className="text-[11px]">
+                      {/* Remove the credit applied, raise a credit note, or refund it: whichever fits. */}
+                      {overpaidAdvice({ invoice: inv, overpaid, canCredit: creditsReady && canRaiseCredit(inv) })}
+                      {canChangeReceived && <> If that is not what they paid, <button type="button" onClick={() => openReceived('correction')} disabled={saving} className="underline font-semibold disabled:opacity-50">change the amount received</button>.</>}
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           </div>
+
+          {/* Payment history: every payment recorded with Mark paid and every
+              correction made with Change, oldest first. Card payments are
+              recorded by the payment link and are not listed here. */}
+          {history.ready && history.rows.length > 0 && (
+            <div className="glass-card rounded-2xl p-5 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={label + ' !mb-0'}>Payment history</span>
+                <span className="text-xs text-dim font-mono">({history.rows.length})</span>
+              </div>
+              {history.rows.map(h => (
+                <div key={h.id} className="glass-inner rounded-xl p-3 space-y-1">
+                  <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg ${h.kind === 'payment' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber/15 text-amber-deep'}`}>{h.kind === 'payment' ? 'Payment' : 'Correction'}</span>
+                    <span className="text-xs text-muted">{whenOf(h.created_at)}{h.who ? ` · ${h.who}` : ''}</span>
+                    <span className="ml-auto text-sm font-semibold tabular-nums text-paper whitespace-nowrap">
+                      {money(h.from_amount)} <span className="text-dim font-normal" aria-label="to">→</span> {money(h.to_amount)}
+                    </span>
+                  </div>
+                  {h.reason && <div className="text-xs text-muted break-words">{h.reason}</div>}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Credit applied to this invoice from other invoices' credit notes.
               Removed rows stay, struck through, with the reason. */}
@@ -579,12 +636,14 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                 {canCredit && <button onClick={openCredit} disabled={saving} className="ml-auto text-xs text-ember hover:text-ember-deep font-medium flex items-center gap-1 disabled:opacity-50"><Plus size={13} /> Raise credit note</button>}
               </div>
               {creditNotes.map(c => {
-                const chip = creditNoteStatusLabel(c);
                 const cancelled = c.status === 'cancelled';
                 const busy = cnBusy === c.id;
                 const use = creditUse(c);
                 const available = cancelled ? 0 : creditAvailable(c);
                 const applied = allocs.from.filter(a => a.credit_note_id === c.id);
+                // Plain words ("Used on INV-1036", "£224.00 to use"); the colour keys on the kind.
+                const chip = creditNoteStatusLabel(c, { invoiceNumber: inv.invoice_number, usedOn: applied, money });
+                const kind = creditNoteStatusKind(c);
                 const refundHow = `${c.refund_method ? ` by ${c.refund_method.toLowerCase()}` : ''}${c.refunded_at ? ` on ${dayOf(c.refunded_at)}` : ''}${c.refund_note ? `. ${c.refund_note}` : ''}`;
                 const act = 'btn-ghost px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-1 disabled:opacity-50';
                 return (
@@ -592,19 +651,18 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={`font-mono text-sm font-semibold ${cancelled ? 'line-through text-dim' : 'text-paper'}`}>{creditNoteLabel(c)}</span>
                       <span className="text-xs text-muted">{dayOf(c.issue_date)}</span>
-                      <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg ${CN_BADGE[chip]}`}>{chip}</span>
+                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-lg ${CN_BADGE[kind]}`}>{chip}</span>
                       <span className={`ml-auto font-mono tabular-nums text-sm font-semibold ${cancelled ? 'line-through text-dim' : 'text-paper'}`}>-{money(c.total)}</span>
                     </div>
                     <div className={`text-xs break-words ${cancelled ? 'text-dim line-through' : 'text-muted'}`}>{c.reason}</div>
-                    {!cancelled && c.refund_status === 'owed' && (use.used > 0 || use.refunded > 0
-                      ? <div className="text-xs text-amber-deep">{[use.used > 0 ? `${money(use.used)} used` : null, use.refunded > 0 ? `${money(use.refunded)} refunded` : null, `${money(use.left)} left`].filter(Boolean).join(', ')}</div>
-                      : <div className="text-xs text-amber-deep">Credit available to the customer: {money(use.left)}. Refund it, or apply it to another invoice.</div>)}
+                    {!cancelled && c.refund_status === 'owed' && use.refunded === 0 && available > 0 && (
+                      <div className="text-xs text-amber-deep">The customer can use this on another invoice, or have it refunded.</div>
+                    )}
                     {/* One refund per note: what is left after a refund (credit
                         applied and then removed) can only be applied again. */}
                     {!cancelled && c.refund_status === 'owed' && use.refunded > 0 && use.left > 0 && (
                       <div className="text-[11px] text-muted">{(c.refunded_at || c.refund_method) && <span className="block">Refunded{refundHow}</span>}This note has already been refunded once, so the {money(use.left)} left can be applied to another invoice but not refunded again.</div>
                     )}
-                    {!cancelled && c.refund_status === 'allocated' && <div className="text-xs text-purple-700">Used {money(use.used)} on other invoices</div>}
                     {c.refund_status === 'refunded' && (
                       <div className="text-xs text-emerald-700">{use.used > 0 ? `Used ${money(use.used)}, refunded ${money(use.refunded)}` : `Refunded ${money(use.refunded)}`}{refundHow}</div>
                     )}
@@ -632,11 +690,13 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                     {cancelled && <div className="text-xs text-muted">Cancelled {dayOf(c.cancelled_at)}{c.cancel_reason ? `: ${c.cancel_reason}` : ''}</div>}
                     {c.sent_at && <div className="text-[10px] text-muted">Emailed{c.email_to ? ` to ${c.email_to}` : ''} on {dayOf(c.sent_at)}</div>}
                     <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                      {canWrite && allocs.ready && available > 0 && (
+                        <button onClick={() => setApplying({ note: { ...c, invoice: { invoice_number: inv.invoice_number } } })} disabled={busy}
+                          title={`Use ${money(available)} of ${creditNoteLabel(c)} on another invoice`}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 flex items-center gap-1 disabled:opacity-50"><ArrowRightLeft size={12} /> Apply</button>
+                      )}
                       <button onClick={() => pdfCredit(c)} disabled={busy} className={act} title={`Download ${creditNoteLabel(c)} as a PDF`}><FileDown size={12} /> PDF</button>
                       {canWrite && !cancelled && <button onClick={() => emailCredit(c)} disabled={busy} className={act}><Mail size={12} /> {c.sent_at ? 'Email again' : 'Email'}</button>}
-                      {canWrite && allocs.ready && available > 0 && (
-                        <button onClick={() => setApplying({ note: { ...c, invoice: { invoice_number: inv.invoice_number } } })} disabled={busy} className={act + ' text-purple-700'}><ArrowRightLeft size={12} /> Apply to an invoice</button>
-                      )}
                       {canWrite && !refundProblem({ note: c }) && <button onClick={() => setRefunding(c)} disabled={busy} className={act + ' text-amber-deep'}><Check size={12} /> Mark refunded</button>}
                       {isOwner && !cancelled && c.refund_status !== 'refunded' && use.refunded === 0 && (
                         <button onClick={() => setCancelling(c)} disabled={busy} className={act + ' ml-auto text-red-600'}><Ban size={12} /> Cancel</button>
@@ -645,6 +705,14 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                   </div>
                 );
               })}
+              {/* Why a note can read "Used on INV-1036" with nothing to use. */}
+              <div className="text-[11px] text-muted pt-1">
+                Credit to use on another invoice appears when the customer has paid more than they now owe.{' '}
+                {canChangeReceived
+                  ? <button type="button" onClick={() => openReceived('correction')} disabled={saving} className="text-ember hover:text-ember-deep font-medium underline underline-offset-2 disabled:opacity-50">Correct the amount received</button>
+                  : 'Correct the amount received'}
+                {' '}if they paid more.
+              </div>
             </div>
           )}
 
@@ -677,6 +745,9 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
           onClose={() => setApplying(null)} onApplied={creditApplied} />
       )}
       {removing && <RemoveCreditModal allocation={removing} onClose={() => setRemoving(null)} onDone={creditRemoved} />}
+      {receiving && (
+        <AmountReceivedModal invoiceId={invoiceId} mode={receiving} onClose={() => setReceiving(null)} onDone={receivedSaved} />
+      )}
     </div>
   );
 }
