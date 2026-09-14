@@ -1,8 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, Send, Link2, Trash2, Plus, Check, Ban, Repeat, FileDown } from 'lucide-react';
-import { money, invStatus, INV_BADGE } from './InvoicesPanel.jsx';
+import { ArrowLeft, Send, Link2, Trash2, Plus, Check, Ban, Repeat, FileDown, FileMinus, Mail } from 'lucide-react';
+import { money, invStatus, INV_BADGE, creditMark, CN_BADGE } from './InvoicesPanel.jsx';
 import { downloadInvoicePdf } from '../../lib/invoicePdf';
+import { round2 } from '../../lib/money';
+import { amountPaid, balanceDue, canRaiseCredit, creditState, creditNoteLabel, creditNoteStatusLabel, overpaidNotOnCredit } from '../../lib/creditNotes';
+import CreditNoteModal, { CancelCreditModal, RefundCreditModal, creditErrorText, downloadCreditNotePdf, loadCreditBasis, sendCreditNoteEmail } from './CreditNoteModal.jsx';
 
 const FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 
@@ -20,10 +23,19 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
   const [seller, setSeller] = useState(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [flash, setFlash] = useState('');
+  // Credit notes against this invoice, oldest first so they read as a history.
+  // creditsReady is false when the table is not there yet (the migration not
+  // applied), and then nothing about credit notes is shown.
+  const [creditNotes, setCreditNotes] = useState([]);
+  const [creditsReady, setCreditsReady] = useState(false);
+  const [raise, setRaise] = useState(null);          // { invoice, lines, creditedLines } while the raise screen is open
+  const [refunding, setRefunding] = useState(null);  // credit note being marked refunded
+  const [cancelling, setCancelling] = useState(null); // credit note being cancelled
+  const [cnBusy, setCnBusy] = useState(null);        // credit note id with a PDF or email in flight
   const canWrite = profile.role === 'owner' || profile.role === 'editor';
 
   const load = useCallback(async () => {
-    const [i, li, c, l, ct, st, pr, sk] = await Promise.all([
+    const [i, li, c, l, ct, st, pr, sk, cn] = await Promise.all([
       supabase.from('invoices').select('*').eq('id', invoiceId).single(),
       supabase.from('invoice_line_items').select('*').eq('invoice_id', invoiceId).order('sort'),
       supabase.from('companies').select('id, name, address, city, postcode').order('name'),
@@ -32,8 +44,10 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
       supabase.from('support_settings').select('invoice_terms, business_name, business_address, business_email, business_phone, logo_url, quote_accent').eq('id', 1).maybeSingle(),
       supabase.from('products').select('id, name, description, default_price, category').eq('active', true).order('name'),
       supabase.from('inv_serials').select('product_id').eq('status', 'in_stock'),
+      supabase.from('credit_notes').select('*').eq('invoice_id', invoiceId).order('credit_number'),
     ]);
     setInv(i.data);
+    setCreditNotes(cn.error ? [] : (cn.data || [])); setCreditsReady(!cn.error);
     setLines((li.data || []).length ? li.data : [{ _new: true, name: '', description: '', qty: 1, unit_price: 0, tax_rate: 20 }]);
     setCompanies(c.data || []); setLocations(l.data || []); setContacts(ct.data || []);
     setProducts(pr.data || []);
@@ -45,10 +59,44 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
   }, [invoiceId]);
   useEffect(() => { load(); }, [load]);
 
+  // After a credit note is issued, emailed, refunded or cancelled only its list
+  // and the invoice's credited figure change, plus the status and payment when
+  // a cancel puts a paid invoice back to sent. So unsaved edits on the page are
+  // kept (load() would put every field back as saved).
+  const refreshCredits = useCallback(async () => {
+    const [cn, i] = await Promise.all([
+      supabase.from('credit_notes').select('*').eq('invoice_id', invoiceId).order('credit_number'),
+      supabase.from('invoices').select('*').eq('id', invoiceId).single(),
+    ]);
+    if (!cn.error) { setCreditNotes(cn.data || []); setCreditsReady(true); }
+    if (i.data) {
+      const { amount_credited, status, amount_paid, paid_at, updated_at } = i.data;
+      setInv(p => (p ? { ...p, amount_credited, status, amount_paid, paid_at, updated_at } : i.data));
+    }
+  }, [invoiceId]);
+
   if (!inv) return <div className="h-full flex items-center justify-center text-dim text-sm">Loading invoice…</div>;
 
   const st = invStatus(inv);
   const locked = ['paid', 'void'].includes(inv.status);
+  // Once a credit note is issued, its lines point at this invoice's lines and
+  // its total was checked against this invoice's total. save() deletes and
+  // re-inserts every line, which would cut those links and could drop the
+  // total below what has been credited, so the lines and totals are frozen.
+  // So is the customer: each credit note copied the company and site from the
+  // invoice, and the two must keep agreeing. The rest of the header (dates,
+  // email, PO, contact) can still be edited.
+  const issuedCredits = creditNotes.filter(c => c.status === 'issued');
+  const creditLocked = issuedCredits.length > 0 || creditState(inv) !== 'none';
+  const linesLocked = locked || creditLocked;
+  const balance = balanceDue(inv);
+  const paidSoFar = amountPaid(inv);
+  const refundOwed = issuedCredits.filter(c => c.refund_status === 'owed').reduce((s, c) => s + Number(c.refund_due || 0), 0);
+  const canCredit = canWrite && creditsReady && canRaiseCredit(inv);
+  // Taken beyond what the invoice asks for and not on any credit note as a
+  // refund (a card payment that landed after a credit, or paid twice).
+  const overpaid = creditsReady ? overpaidNotOnCredit(inv, creditNotes) : 0;
+  const showBalance = !['draft', 'void'].includes(inv.status) && (creditState(inv) !== 'none' || (paidSoFar > 0 && balance > 0));
   const set = (k, v) => setInv(p => ({ ...p, [k]: v }));
   const setLine = (i, k, v) => setLines(p => p.map((l, j) => j === i ? { ...l, [k]: v } : l));
   const locs = locations.filter(l => !inv.company_id || l.company_id === inv.company_id);
@@ -61,27 +109,38 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
 
   const save = async (extra = {}) => {
     setSaving(true);
+    // Checked again at the moment of saving, not just when the screen loaded:
+    // someone else may have issued a credit note on this invoice since.
+    let keepLines = creditLocked;
+    if (!keepLines && creditsReady) {
+      const { count } = await supabase.from('credit_notes').select('id', { count: 'exact', head: true })
+        .eq('invoice_id', invoiceId).eq('status', 'issued');
+      keepLines = (count || 0) > 0;
+    }
     const patch = {
       company_id: inv.company_id || null, location_id: inv.location_id || null, contact_id: inv.contact_id || null,
       email_to: (inv.email_to || '').trim() || null, issue_date: inv.issue_date, due_date: inv.due_date || null,
-      subtotal, tax_amount: taxAmount, total,
+      ...(keepLines ? {} : { subtotal, tax_amount: taxAmount, total }),
       terms: (inv.terms || '').trim() || null, notes: (inv.notes || '').trim() || null,
       po_number: (inv.po_number || '').trim() || null, ...extra,
     };
-    const { error } = await supabase.from('invoices').update(patch).eq('id', invoiceId);
-    if (!error) {
-      await supabase.from('invoice_line_items').delete().eq('invoice_id', invoiceId);
+    let { error } = await supabase.from('invoices').update(patch).eq('id', invoiceId);
+    if (!error && !keepLines) {
+      ({ error } = await supabase.from('invoice_line_items').delete().eq('invoice_id', invoiceId));
       const clean = lines.filter(l => (l.name || '').trim());
-      if (clean.length) {
-        await supabase.from('invoice_line_items').insert(clean.map((l, i) => ({
+      if (!error && clean.length) {
+        ({ error } = await supabase.from('invoice_line_items').insert(clean.map((l, i) => ({
           invoice_id: invoiceId, name: l.name.trim(), description: (l.description || '').trim() || null,
           qty: Number(l.qty) || 1, unit_price: Number(l.unit_price) || 0,
           tax_rate: Number(l.tax_rate) || 0, sort: i,
-        })));
+        }))));
       }
     }
     setSaving(false);
-    if (error) { alert(error.message); return false; }
+    // The database refuses new totals or lines once a credit note is issued,
+    // even when someone's credit landed after the check above. Its message
+    // says so; the page then shows the invoice as it really stands.
+    if (error) { alert(error.message); load(); return false; }
     load();
     return true;
   };
@@ -113,30 +172,37 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
     try { await navigator.clipboard.writeText(url); notify('Link copied'); } catch { prompt('Invoice link:', url); }
   };
 
+  // Seller and bill-to blocks for a PDF, shared by the invoice and its credit
+  // notes. A credit note bills whoever it copied from the invoice when issued.
+  const sellerInfo = () => ({
+    name: seller?.business_name, address: seller?.business_address,
+    email: seller?.business_email, phone: seller?.business_phone,
+    logo_url: seller?.logo_url, accent: seller?.quote_accent,
+  });
+  const billToFor = (rec) => {
+    const company = companies.find(c => c.id === rec.company_id);
+    const location = locations.find(l => l.id === rec.location_id);
+    const contact = contacts.find(c => c.id === rec.contact_id);
+    const addr = (o) => o ? [o.address, o.city, o.postcode].filter(Boolean).join(', ') : '';
+    return {
+      companyName: company?.name, companyAddress: addr(company),
+      contactName: contact ? [contact.first_name, contact.last_name].filter(Boolean).join(' ') : '',
+      contactEmail: contact?.email,
+      locationName: location?.name, locationAddress: addr(location),
+    };
+  };
+
   // One-click PDF. Persists edits first (unless locked) so the file matches the
   // saved invoice, then renders client-side via the lazy-loaded generator.
   const downloadPdf = async () => {
     setPdfBusy(true);
     try {
       if (!locked && !(await save())) { setPdfBusy(false); return; }
-      const company = companies.find(c => c.id === inv.company_id);
-      const location = locations.find(l => l.id === inv.location_id);
-      const contact = contacts.find(c => c.id === inv.contact_id);
-      const addr = (o) => o ? [o.address, o.city, o.postcode].filter(Boolean).join(', ') : '';
       await downloadInvoicePdf({
         inv: { ...inv, terms: inv.terms || globalTerms }, lines,
         totals: { subtotal, tax: taxAmount, total, paid: inv.amount_paid },
-        seller: {
-          name: seller?.business_name, address: seller?.business_address,
-          email: seller?.business_email, phone: seller?.business_phone,
-          logo_url: seller?.logo_url, accent: seller?.quote_accent,
-        },
-        billTo: {
-          companyName: company?.name, companyAddress: addr(company),
-          contactName: contact ? [contact.first_name, contact.last_name].filter(Boolean).join(' ') : '',
-          contactEmail: contact?.email,
-          locationName: location?.name, locationAddress: addr(location),
-        },
+        seller: sellerInfo(),
+        billTo: billToFor(inv),
         fmt: money, taxLabel: 'VAT', dateLocale: 'en-GB',
       });
       notify('PDF downloaded');
@@ -145,18 +211,76 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
   };
 
   const markPaid = async () => {
-    if (!confirm('Mark this invoice as paid (received outside Stripe)?')) return;
-    await save({ status: 'paid', paid_at: new Date().toISOString(), amount_paid: total });
+    // With credit issued the customer only ever owed the balance, so that is
+    // what came in on top of anything already paid. Without credit this is
+    // the invoice total, as it always was.
+    const received = creditLocked ? round2(paidSoFar + balance) : total;
+    if (!confirm(creditLocked
+      ? `Mark this invoice as paid? This records the balance of ${money(balance)} as received outside Stripe.`
+      : 'Mark this invoice as paid (received outside Stripe)?')) return;
+    await save({ status: 'paid', paid_at: new Date().toISOString(), amount_paid: received });
     notify('Marked paid');
   };
   const voidInvoice = async () => {
+    if (issuedCredits.length) { alert('This invoice has credit notes issued against it. Cancel them before voiding it.'); return; }
     if (!confirm('Void this invoice? The public link will stop working.')) return;
     await save({ status: 'void' });
   };
   const del = async () => {
+    const noDelete = `INV-${inv.invoice_number} has credit notes against it, so it cannot be deleted. Void it instead once they are cancelled.`;
+    if (creditNotes.length) { alert(noDelete); return; }
     if (!confirm(`Delete invoice INV-${inv.invoice_number}? This cannot be undone.`)) return;
-    await supabase.from('invoices').delete().eq('id', invoiceId);
+    const { error } = await supabase.from('invoices').delete().eq('id', invoiceId);
+    // 23503: a credit note still points at this invoice (on delete restrict).
+    if (error) { alert(error.code === '23503' ? noDelete : `Could not delete the invoice: ${error.message}`); return; }
     onClose();
+  };
+
+  // ── Credit notes ──
+  const creditEmail = (rec) => rec?.email_to || inv.email_to || contacts.find(c => c.id === inv.contact_id)?.email || '';
+
+  // The raise screen works from the invoice as SAVED. Unsaved edits are saved
+  // first, as Send and PDF do, on a credited invoice too: its header (dates,
+  // email, PO, notes) can still change, and would otherwise be lost. Because
+  // save() re-creates the lines with new ids, the lines (and what earlier
+  // credit notes used of them) are read back afterwards, not taken from here.
+  const openCredit = async () => {
+    if (!locked && !(await save())) return;
+    const basis = await loadCreditBasis(invoiceId);
+    if (basis.error) { alert('Could not load the invoice: ' + creditErrorText(basis.error)); return; }
+    if (!canRaiseCredit(basis.invoice)) { alert('Nothing is left to credit on this invoice.'); refreshCredits(); return; }
+    setRaise(basis);
+  };
+  const creditIssued = (note, { emailed, emailError }) => {
+    setRaise(null);
+    refreshCredits();
+    const name = creditNoteLabel(note);
+    if (emailError) alert(`${name} is issued, but the email did not send: ${emailError} Use Email on the credit note to try again.`);
+    else notify(emailed ? `${name} issued and sent to ${emailed}` : `${name} issued`);
+  };
+  const emailCredit = async (note) => {
+    const to = prompt(`Email ${creditNoteLabel(note)} to:`, creditEmail(note));
+    if (!to) return;
+    setCnBusy(note.id);
+    try {
+      const d = await sendCreditNoteEmail(note.id, to);
+      notify(`Sent to ${d.to || to.trim()}`);
+      refreshCredits();
+    } catch (e) { alert('Send failed: ' + e.message); }
+    setCnBusy(null);
+  };
+  const pdfCredit = async (note) => {
+    setCnBusy(note.id);
+    try {
+      await downloadCreditNotePdf({ note, invoice: { ...inv, terms: inv.terms || globalTerms }, seller: sellerInfo(), billTo: billToFor(note) });
+      notify('PDF downloaded');
+    } catch (e) { alert('PDF failed: ' + e.message); }
+    setCnBusy(null);
+  };
+  const dayOf = (d) => {
+    if (!d) return '';
+    const date = new Date(String(d).length <= 10 ? `${d}T00:00:00` : d);
+    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
   const input = "w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember disabled:opacity-60";
@@ -170,6 +294,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
         <button onClick={onClose} className="text-muted hover:text-paper"><ArrowLeft size={18} /></button>
         <div className="text-xl font-bold text-paper">INV-{inv.invoice_number}</div>
         <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg ${INV_BADGE[st]}`}>{st}</span>
+        {creditMark(inv) && <span className="text-[10px] font-semibold text-purple-700">{creditMark(inv)}</span>}
         {inv.viewed_at
           ? <span className="text-[10px] font-semibold text-emerald-600" title={`Customer opened the invoice ${new Date(inv.viewed_at).toLocaleString('en-GB')}`}>👁 Viewed {new Date(inv.viewed_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
           : inv.sent_at && <span className="text-[10px] text-muted">Sent {new Date(inv.sent_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · not opened yet</span>}
@@ -180,8 +305,9 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
             {!locked && <button onClick={() => save().then(ok => ok && notify('Saved'))} disabled={saving} className="btn-ghost px-4 py-2 rounded-xl text-sm disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>}
             <button onClick={copyLink} className="btn-ghost px-3 py-2 rounded-xl text-sm flex items-center gap-1.5"><Link2 size={14} /> Copy link</button>
             <button onClick={downloadPdf} disabled={pdfBusy} title="Download this invoice as a PDF" className="btn-ghost px-3 py-2 rounded-xl text-sm flex items-center gap-1.5 disabled:opacity-50"><FileDown size={14} /> {pdfBusy ? 'Preparing…' : 'PDF'}</button>
+            {canCredit && <button onClick={openCredit} disabled={saving} title="Raise a credit note against this invoice" className="btn-ghost px-3 py-2 rounded-xl text-sm flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"><FileMinus size={14} /> Raise credit note</button>}
             {!locked && <button onClick={sendInvoice} disabled={sending} className="btn-glass px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50"><Send size={14} /> {sending ? 'Sending…' : inv.sent_at ? 'Resend' : 'Send'}</button>}
-            {!locked && <button onClick={markPaid} className="px-3 py-2 rounded-xl text-sm font-semibold bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 flex items-center gap-1.5"><Check size={14} /> Mark paid</button>}
+            {!locked && !(creditLocked && balance === 0) && <button onClick={markPaid} className="px-3 py-2 rounded-xl text-sm font-semibold bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 flex items-center gap-1.5"><Check size={14} /> Mark paid</button>}
             {!locked && <button onClick={voidInvoice} title="Void" className="btn-ghost px-3 py-2 rounded-xl text-sm flex items-center gap-1.5 text-muted"><Ban size={14} /></button>}
             {profile.role === 'owner' && <button onClick={del} title="Delete" className="px-3 py-2 text-red-600 border border-red-200 rounded-xl hover:bg-red-50"><Trash2 size={14} /></button>}
           </div>
@@ -194,10 +320,10 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
           {/* Customer + dates */}
           <div className="glass-card rounded-2xl p-5 grid grid-cols-2 md:grid-cols-3 gap-3">
             <div><label className={label}>Company</label>
-              <select className={input} disabled={locked} value={inv.company_id || ''} onChange={e => { set('company_id', e.target.value || null); set('location_id', null); }}>
+              <select className={input} disabled={linesLocked} value={inv.company_id || ''} onChange={e => { set('company_id', e.target.value || null); set('location_id', null); }}>
                 <option value="">—</option>{companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
             <div><label className={label}>Location</label>
-              <select className={input} disabled={locked} value={inv.location_id || ''} onChange={e => set('location_id', e.target.value || null)}>
+              <select className={input} disabled={linesLocked} value={inv.location_id || ''} onChange={e => set('location_id', e.target.value || null)}>
                 <option value="">—</option>{locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
             <div><label className={label}>Contact</label>
               <select className={input} disabled={locked} value={inv.contact_id || ''} onChange={e => set('contact_id', e.target.value || null)}>
@@ -212,7 +338,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
           <div className="glass-card rounded-2xl p-5 space-y-2">
             <div className="flex items-center gap-3">
               <span className={label + ' !mb-0'}>Line items</span>
-              {!locked && (
+              {!linesLocked && (
                 <div className="ml-auto flex items-center gap-3">
                   {products.length > 0 ? (
                     <select className={input + ' !w-60 !py-1.5 text-xs'} value=""
@@ -237,21 +363,24 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                 </div>
               )}
             </div>
+            {creditLocked && !locked && (
+              <div className="text-[11px] text-muted">The lines are locked because a credit note has been issued on this invoice. To change what is owed, raise another credit note.</div>
+            )}
             {lines.length === 0 && <div className="text-xs text-dim italic py-4 text-center">No line items yet. Add from products or start a blank line.</div>}
             {lines.map((l, i) => (
               <div key={l.id || `n${i}`} className="glass-inner rounded-xl p-3 space-y-2">
                 <div className="flex items-center gap-2">
-                  <input className={cell + ' flex-1'} disabled={locked} value={l.name} onChange={e => setLine(i, 'name', e.target.value)} placeholder="Item name — e.g. Card terminal" />
-                  {!locked && <button onClick={() => setLines(p => p.filter((_, j) => j !== i))} title="Remove line" className="text-red-500 hover:text-red-600 text-sm shrink-0">&times;</button>}
+                  <input className={cell + ' flex-1'} disabled={linesLocked} value={l.name} onChange={e => setLine(i, 'name', e.target.value)} placeholder="Item name — e.g. Card terminal" />
+                  {!linesLocked && <button onClick={() => setLines(p => p.filter((_, j) => j !== i))} title="Remove line" className="text-red-500 hover:text-red-600 text-sm shrink-0">&times;</button>}
                 </div>
-                <input className={cell + ' w-full text-xs'} disabled={locked} value={l.description || ''} onChange={e => setLine(i, 'description', e.target.value)} placeholder="Description (shown on the invoice)" />
+                <input className={cell + ' w-full text-xs'} disabled={linesLocked} value={l.description || ''} onChange={e => setLine(i, 'description', e.target.value)} placeholder="Description (shown on the invoice)" />
                 <div className="grid grid-cols-3 gap-2">
                   <div><span className="text-[9px] text-dim block">Qty</span>
-                    <input type="number" className={cell + ' w-full'} disabled={locked} value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} placeholder="1" /></div>
+                    <input type="number" className={cell + ' w-full'} disabled={linesLocked} value={l.qty} onChange={e => setLine(i, 'qty', e.target.value)} placeholder="1" /></div>
                   <div><span className="text-[9px] text-dim block">Unit £ (ex VAT)</span>
-                    <input type="number" className={cell + ' w-full'} disabled={locked} value={l.unit_price} onChange={e => setLine(i, 'unit_price', e.target.value)} placeholder="0.00" /></div>
+                    <input type="number" className={cell + ' w-full'} disabled={linesLocked} value={l.unit_price} onChange={e => setLine(i, 'unit_price', e.target.value)} placeholder="0.00" /></div>
                   <div><span className="text-[9px] text-dim block">VAT %</span>
-                    <input type="number" className={cell + ' w-full'} disabled={locked} value={l.tax_rate ?? 20} onChange={e => setLine(i, 'tax_rate', e.target.value)} placeholder="20" /></div>
+                    <input type="number" className={cell + ' w-full'} disabled={linesLocked} value={l.tax_rate ?? 20} onChange={e => setLine(i, 'tax_rate', e.target.value)} placeholder="20" /></div>
                 </div>
                 <div className="text-right text-xs text-muted">
                   Net: <span className="text-paper font-mono font-semibold">{money((Number(l.qty) || 0) * (Number(l.unit_price) || 0))}</span>
@@ -266,9 +395,62 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
                 <div className="flex justify-between text-muted"><span>VAT (per line)</span><span className="tabular-nums">{money(taxAmount)}</span></div>
                 <div className="flex justify-between text-base font-bold text-paper pt-1.5 border-t border-bdr"><span>Total</span><span className="tabular-nums">{money(total)}</span></div>
                 {inv.status === 'paid' && <div className="flex justify-between text-emerald-600 font-semibold"><span>Paid</span><span className="tabular-nums">{money(inv.amount_paid ?? total)}</span></div>}
+                {inv.status !== 'paid' && showBalance && paidSoFar > 0 && <div className="flex justify-between text-emerald-600 font-semibold"><span>Paid</span><span className="tabular-nums">{money(paidSoFar)}</span></div>}
+                {creditState(inv) !== 'none' && <div className="flex justify-between text-purple-700 font-semibold"><span>Credited</span><span className="tabular-nums">-{money(inv.amount_credited)}</span></div>}
+                {showBalance && <div className="flex justify-between text-base font-bold text-paper pt-1.5 border-t border-bdr"><span>Balance due</span><span className="tabular-nums">{money(balance)}</span></div>}
+                {refundOwed > 0 && <div className="flex justify-between text-amber-deep font-semibold"><span>Refund owed</span><span className="tabular-nums">{money(refundOwed)}</span></div>}
+                {overpaid > 0 && (
+                  <div className="text-amber-deep">
+                    <div className="flex justify-between font-semibold"><span>Overpaid</span><span className="tabular-nums">{money(overpaid)}</span></div>
+                    <div className="text-[11px]">More was paid than this invoice asks for and no credit note shows it as a refund owed. Refund it to the customer.</div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
+
+          {/* Credit notes: listed even when cancelled (struck through), since a
+              credit note keeps its number for good. */}
+          {creditsReady && creditNotes.length > 0 && (
+            <div className="glass-card rounded-2xl p-5 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={label + ' !mb-0'}>Credit notes</span>
+                <span className="text-xs text-dim font-mono">({creditNotes.length})</span>
+                {canCredit && <button onClick={openCredit} disabled={saving} className="ml-auto text-xs text-ember hover:text-ember-deep font-medium flex items-center gap-1 disabled:opacity-50"><Plus size={13} /> Raise credit note</button>}
+              </div>
+              {creditNotes.map(c => {
+                const chip = creditNoteStatusLabel(c);
+                const cancelled = c.status === 'cancelled';
+                const busy = cnBusy === c.id;
+                const act = 'btn-ghost px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-1 disabled:opacity-50';
+                return (
+                  <div key={c.id} className="glass-inner rounded-xl p-3 space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`font-mono text-sm font-semibold ${cancelled ? 'line-through text-dim' : 'text-paper'}`}>{creditNoteLabel(c)}</span>
+                      <span className="text-xs text-muted">{dayOf(c.issue_date)}</span>
+                      <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg ${CN_BADGE[chip]}`}>{chip}</span>
+                      <span className={`ml-auto font-mono tabular-nums text-sm font-semibold ${cancelled ? 'line-through text-dim' : 'text-paper'}`}>-{money(c.total)}</span>
+                    </div>
+                    <div className={`text-xs break-words ${cancelled ? 'text-dim line-through' : 'text-muted'}`}>{c.reason}</div>
+                    {!cancelled && c.refund_status === 'owed' && <div className="text-xs text-amber-deep">Refund owed to the customer: {money(c.refund_due)}</div>}
+                    {c.refund_status === 'refunded' && (
+                      <div className="text-xs text-emerald-700">Refunded {money(c.refund_due)}{c.refund_method ? ` by ${c.refund_method.toLowerCase()}` : ''} on {dayOf(c.refunded_at)}{c.refund_note ? `. ${c.refund_note}` : ''}</div>
+                    )}
+                    {cancelled && <div className="text-xs text-muted">Cancelled {dayOf(c.cancelled_at)}{c.cancel_reason ? `: ${c.cancel_reason}` : ''}</div>}
+                    {c.sent_at && <div className="text-[10px] text-muted">Emailed{c.email_to ? ` to ${c.email_to}` : ''} on {dayOf(c.sent_at)}</div>}
+                    <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                      <button onClick={() => pdfCredit(c)} disabled={busy} className={act} title={`Download ${creditNoteLabel(c)} as a PDF`}><FileDown size={12} /> PDF</button>
+                      {canWrite && !cancelled && <button onClick={() => emailCredit(c)} disabled={busy} className={act}><Mail size={12} /> {c.sent_at ? 'Email again' : 'Email'}</button>}
+                      {canWrite && !cancelled && c.refund_status === 'owed' && <button onClick={() => setRefunding(c)} disabled={busy} className={act + ' text-amber-deep'}><Check size={12} /> Mark refunded</button>}
+                      {profile.role === 'owner' && !cancelled && c.refund_status !== 'refunded' && (
+                        <button onClick={() => setCancelling(c)} disabled={busy} className={act + ' ml-auto text-red-600'}><Ban size={12} /> Cancel</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Notes + terms */}
           <div className="glass-card rounded-2xl p-5 space-y-3">
@@ -281,6 +463,19 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
 
         </div>
       </div>
+
+      {raise && (
+        <CreditNoteModal invoice={raise.invoice} invoiceLines={raise.lines} creditedLines={raise.creditedLines} defaultEmail={creditEmail(raise.invoice)}
+          onClose={() => setRaise(null)} onIssued={creditIssued} />
+      )}
+      {refunding && (
+        <RefundCreditModal note={refunding} onClose={() => setRefunding(null)}
+          onDone={() => { notify(`${creditNoteLabel(refunding)} marked refunded`); setRefunding(null); refreshCredits(); }} />
+      )}
+      {cancelling && (
+        <CancelCreditModal note={cancelling} invoice={inv} notes={creditNotes} onClose={() => setCancelling(null)}
+          onDone={() => { notify(`${creditNoteLabel(cancelling)} cancelled`); setCancelling(null); refreshCredits(); }} />
+      )}
     </div>
   );
 }

@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
+import { amountPaid, balanceDue, creditNoteLabel, creditState } from '../lib/creditNotes';
 
 // Public hosted invoice page (/i/<token>). Branded from support_settings,
-// customer pays by card via Stripe Checkout.
+// customer pays by card via Stripe Checkout. Credit notes raised against the
+// invoice are listed with links to their own pages (/c/<token>), and the Pay
+// button asks for what is left after them, never the full total.
 
 const FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 const money = (v) => `£${Number(v || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+// A bare date ('2026-09-12') is read as local midnight. new Date() on its own
+// reads it as midnight UTC, which shows the day before anywhere west of London.
+const fmtDate = (d) => d ? new Date(String(d).length <= 10 ? `${d}T00:00:00` : d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
 
 export default function PublicInvoice({ token }) {
   const [data, setData] = useState(null);
@@ -46,6 +51,31 @@ export default function PublicInvoice({ token }) {
   const accent = seller.accent || '#15C26A';
   const isPaid = inv.status === 'paid' || justPaid;
 
+  // Credit notes. invoice-public sends balance_due, the figure invoice-checkout
+  // charges; the same sum from src/lib/creditNotes.js stands in until that
+  // function is redeployed, and gives the old page's figure when there is no
+  // credit. A number or 'CN-1001' is accepted for each note.
+  const credits = data.credit_notes || inv.credit_notes || [];
+  const credited = Number(inv.amount_credited) || 0;
+  const hasCredit = credited > 0;
+  const balance = inv.balance_due != null ? Math.max(0, Number(inv.balance_due) || 0) : balanceDue(inv);
+  const paidSoFar = amountPaid(inv);
+  const creditKind = hasCredit ? creditState(inv) : 'none';
+  const fullyCredited = !isPaid && creditKind === 'full' && paidSoFar === 0;
+  // Credit (with any part payment) has covered the lot: nothing to charge and
+  // nothing to chase, though the status is still sent or viewed.
+  const nothingToPay = !isPaid && balance <= 0;
+  // With credit or a part payment the Pay button asks for less than the total,
+  // so the totals show each step down to that figure.
+  const showSteps = hasCredit || (!isPaid && paidSoFar > 0);
+  // Paid in full and then credited: the balance stops at 0, so say where the
+  // rest went (the credit note says whether it has been refunded yet).
+  const overpaid = hasCredit ? paidSoFar - ((Number(inv.total) || 0) - credited) : 0;
+  const cnLabel = (c) => {
+    const n = c.number ?? c.credit_number;
+    return typeof n === 'string' && /^CN-/i.test(n) ? n : creditNoteLabel(n);
+  };
+
   return (
     <Page>
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -66,10 +96,19 @@ export default function PublicInvoice({ token }) {
             <div className="mt-2">
               {isPaid
                 ? <Badge bg="#d1fae5" color="#065f46">Paid</Badge>
-                : inv.overdue
-                  ? <Badge bg="#fee2e2" color="#991b1b">Overdue</Badge>
-                  : <Badge bg="#fef3c7" color="#92400e">Awaiting payment</Badge>}
+                : fullyCredited
+                  ? <Badge bg="#e0e7ff" color="#3730a3">Credited</Badge>
+                  : nothingToPay
+                    ? <Badge bg="#d1fae5" color="#065f46">Nothing to pay</Badge>
+                    : inv.overdue
+                      ? <Badge bg="#fee2e2" color="#991b1b">Overdue</Badge>
+                      : <Badge bg="#fef3c7" color="#92400e">Awaiting payment</Badge>}
             </div>
+            {hasCredit && !fullyCredited && (
+              <div className="text-[11px] font-semibold text-indigo-700 mt-1">
+                {creditKind === 'full' ? 'Credited' : 'Part credited'}
+              </div>
+            )}
           </div>
         </div>
 
@@ -117,10 +156,47 @@ export default function PublicInvoice({ token }) {
             <div className="w-60 space-y-1.5 text-sm">
               <div className="flex justify-between text-slate-500"><span>Subtotal</span><span className="tabular-nums">{money(inv.subtotal)}</span></div>
               <div className="flex justify-between text-slate-500"><span>VAT</span><span className="tabular-nums">{money(inv.tax_amount)}</span></div>
-              <div className="flex justify-between text-base font-bold text-slate-900 pt-1.5 border-t border-slate-200"><span>Total due</span><span className="tabular-nums">{money(inv.total)}</span></div>
+              {showSteps ? (
+                <>
+                  <div className="flex justify-between font-semibold text-slate-800 pt-1.5 border-t border-slate-200"><span>Total</span><span className="tabular-nums">{money(inv.total)}</span></div>
+                  {hasCredit && <div className="flex justify-between text-slate-500"><span>Credited</span><span className="tabular-nums">-{money(credited)}</span></div>}
+                  {paidSoFar > 0 && <div className="flex justify-between text-slate-500"><span>Paid</span><span className="tabular-nums">-{money(paidSoFar)}</span></div>}
+                  <div className="flex justify-between text-base font-bold text-slate-900 pt-1.5 border-t border-slate-200"><span>Balance due</span><span className="tabular-nums">{money(isPaid ? 0 : balance)}</span></div>
+                  {overpaid > 0.005 && <div className="text-xs text-slate-500 text-right">{money(overpaid)} more was paid than is now owed</div>}
+                </>
+              ) : (
+                <div className="flex justify-between text-base font-bold text-slate-900 pt-1.5 border-t border-slate-200"><span>Total due</span><span className="tabular-nums">{money(inv.total)}</span></div>
+              )}
             </div>
           </div>
         </div>
+
+        {/* Credit notes: issued ones only (invoice-public leaves cancelled ones out) */}
+        {credits.length > 0 && (
+          <div className="px-8 pb-5">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Credit notes</div>
+            <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
+              {credits.map((c, i) => {
+                const token = c.public_token || c.token;
+                const row = (
+                  <>
+                    <span className="min-w-0">
+                      <span className="font-semibold text-slate-800">{cnLabel(c)}</span>
+                      {c.issue_date && <span className="block sm:inline text-xs text-slate-500"><span className="hidden sm:inline"> · </span>{fmtDate(c.issue_date)}</span>}
+                    </span>
+                    <span className="flex items-center gap-3 shrink-0">
+                      <span className="tabular-nums text-slate-800">-{money(c.total)}</span>
+                      {token && <span className="text-xs font-semibold" style={{ color: accent }}>View</span>}
+                    </span>
+                  </>
+                );
+                return token
+                  ? <a key={token} href={`/c/${encodeURIComponent(token)}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-slate-50">{row}</a>
+                  : <div key={i} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">{row}</div>;
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Pay */}
         <div className="px-8 pb-6">
@@ -128,12 +204,17 @@ export default function PublicInvoice({ token }) {
             <div className="rounded-xl p-4 text-center font-semibold" style={{ background: '#ecfdf5', color: '#065f46' }}>
               ✓ Paid{inv.paid_at ? ` on ${fmtDate(inv.paid_at.slice(0, 10))}` : ''} — thank you!
             </div>
+          ) : nothingToPay ? (
+            <div className="rounded-xl p-4 text-center" style={{ background: '#f1f5f9', color: '#334155' }}>
+              <div className="font-semibold">Nothing left to pay</div>
+              {hasCredit && <div className="text-xs text-slate-500 mt-0.5">{fullyCredited ? 'This invoice has been credited in full.' : 'Payments and credit notes cover this invoice.'}</div>}
+            </div>
           ) : (
             <>
               <button onClick={pay} disabled={paying}
                 className="w-full py-3.5 rounded-xl text-white font-bold text-base transition hover:opacity-90 disabled:opacity-50"
                 style={{ background: accent }}>
-                {paying ? 'Redirecting…' : `Pay ${money(inv.total)} by card`}
+                {paying ? 'Redirecting…' : `Pay ${money(balance)} by card`}
               </button>
               {error && <div className="text-sm text-red-600 text-center mt-2">{error}</div>}
               <div className="text-[11px] text-slate-400 text-center mt-2">Secure card payment powered by Stripe</div>

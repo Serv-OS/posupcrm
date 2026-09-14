@@ -8,6 +8,7 @@ import OnboardingPack from './components/OnboardingPack.jsx';
 import BookingPage from './components/BookingPage.jsx';
 import PublicQuote from './components/PublicQuote.jsx';
 import PublicInvoice from './components/PublicInvoice.jsx';
+import PublicCreditNote from './components/PublicCreditNote.jsx';
 import BankCallback from './components/BankCallback.jsx';
 
 export default function App() {
@@ -24,6 +25,8 @@ export default function App() {
   const quoteMatch = window.location.pathname.match(/^\/q\/([^/?#]+)/);
   // Public invoice route: /i/<token>
   const invoiceMatch = window.location.pathname.match(/^\/i\/([^/?#]+)/);
+  // Public credit note route: /c/<token>
+  const creditMatch = window.location.pathname.match(/^\/c\/([^/?#]+)/);
   // Bank-feed OAuth return: /bank/callback?ref=<reference> (authenticated user)
   const bankCb = window.location.pathname.match(/^\/bank\/callback/);
 
@@ -51,6 +54,9 @@ export default function App() {
   }
   if (invoiceMatch) {
     return <PublicInvoice token={decodeURIComponent(invoiceMatch[1])} />;
+  }
+  if (creditMatch) {
+    return <PublicCreditNote token={decodeURIComponent(creditMatch[1])} />;
   }
   if (bankCb) {
     return <BankCallback />;

@@ -6,7 +6,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { invoiceEmailHtml, sendInvoiceEmail, money } from "../_shared/invoiceEmail.ts";
+import { invoiceEmailHtml, sendInvoiceEmail, money, balanceDue } from "../_shared/invoiceEmail.ts";
 import { buildInvoicePdfBytes } from "../_shared/invoicePdf.ts";
 
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "Content-Type": "application/json" } });
@@ -120,6 +120,11 @@ serve(async (req) => {
         if (sends.length >= SEND_PER_RUN) break;
         const sched: any = (inv as any).recurring;
         if (!sched?.auto_send) continue;
+        // Never bill a customer for nothing. This pass only emails drafts, and
+        // issue_credit_note refuses drafts, so today no draft carries credit;
+        // this is here so that stays true if that ever changes. A skipped one
+        // stays a draft, and the stuck-send alert below puts it in front of an owner.
+        if (Number(inv.amount_credited) > 0 && balanceDue(inv) <= 0) continue;
         let recipient = (sched.email_to || "").trim();
         if (!recipient && sched.contact_id) {
           const { data: c } = await supabase.from("contacts").select("email").eq("id", sched.contact_id).maybeSingle();
