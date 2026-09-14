@@ -21,10 +21,11 @@ async function createPaidInvoiceForQuote(supabase: any, quoteId: string, paidAmo
 
   if (inv) {
     // Recorded exactly as a payment on the invoice's own pay link: added to
-    // what was paid, once per Stripe session, paid once nothing is left, and
-    // anything beyond the balance (credit notes issued on the invoice since
-    // the quote pay page opened) owed back on its credit notes. Recording the
-    // quote total as paid hid that refund.
+    // what was paid, once per Stripe session, paid once the cash plus any
+    // credit applied to the invoice covers it, and anything beyond the balance
+    // (credit notes issued on the invoice, or credit applied to it, since the
+    // quote pay page opened) held as credit available on its credit notes.
+    // Recording the quote total as paid hid that refund.
     const r = await recordInvoicePayment(supabase, inv.id, paidAmount, sessionId);
     logPayment(r, sessionId, paidAmount);
     // A repeat delivery was receipted the first time.
@@ -108,7 +109,8 @@ serve(async (req) => {
     // Invoice payments (one-off + recurring)
     const invoiceId = session.metadata?.invoice_id;
     if (invoiceId) {
-      // invoice-checkout charges the balance due, not the total, so this is
+      // invoice-checkout charges the balance due (after payments, credit notes
+      // and credit applied from other invoices), not the total, so this is
       // added to anything already paid (a deposit) rather than replacing it;
       // see _shared/invoicePayment.ts for the rest. A failure to record is
       // answered with a 500 so Stripe sends the event again, which is safe: a

@@ -6,8 +6,8 @@ import { creditNotePdf } from '../../lib/invoicePdf';
 import { money } from './InvoicesPanel.jsx';
 import { round2 } from '../../lib/money';
 import {
-  REASON_MAX, REFUND_METHODS, amountPaid, cancelCreditEffect, creditIssueDate, creditTotals, creditableLeft,
-  creditNoteLabel, lineCreditLeft, lineNet, lineTax, linesFromInvoice, refundFor, taxRatesFor, validateCredit,
+  REASON_MAX, REFUND_METHODS, amountPaid, cancelCreditEffect, creditAvailable, creditIssueDate, creditTotals, creditableLeft,
+  creditNoteLabel, creditUse, lineCreditLeft, lineNet, lineTax, linesFromInvoice, refundFor, settledAmount, taxRatesFor, validateCredit,
 } from '../../lib/creditNotes';
 
 const FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
@@ -74,14 +74,34 @@ export async function sendCreditNoteEmail(creditNoteId, to) {
  * Downloads one credit note as a PDF (creditNotePdf saves it as CN-1001.pdf).
  * The lines are fetched here, when asked, so listing credit notes stays cheap.
  * `invoice`, `seller` and `billTo` take the same shapes the invoice PDF uses.
+ * The credit applied from the note to other invoices goes along as
+ * `allocations`: [{ invoice_number, amount, allocated_on, note }], active ones
+ * only, oldest first ([] before the credit allocations migration).
  */
 export async function downloadCreditNotePdf({ note, invoice, seller, billTo }) {
-  const { data: lines, error } = await supabase.from('credit_note_lines').select('*').eq('credit_note_id', note.id).order('sort');
+  const [{ data: lines, error }, allocations] = await Promise.all([
+    supabase.from('credit_note_lines').select('*').eq('credit_note_id', note.id).order('sort'),
+    loadNoteAllocationsForPdf(note.id),
+  ]);
   if (error) throw new Error(error.message);
   await creditNotePdf({
-    note, lines: lines || [], invoice, seller, billTo,
+    note, lines: lines || [], invoice, seller, billTo, allocations,
     fmt: money, taxLabel: 'VAT', dateLocale: 'en-GB',
   });
+}
+
+// Active credit applied from one note, with the invoice numbers it went to.
+// Anything that fails (the table not there yet) just prints no applied credit.
+async function loadNoteAllocationsForPdf(noteId) {
+  const a = await supabase.from('credit_allocations').select('*').eq('credit_note_id', noteId).is('removed_at', null).order('created_at');
+  const rows = a.error ? [] : (a.data || []).filter(r => !r.removed_at);
+  if (!rows.length) return [];
+  const ids = [...new Set(rows.map(r => r.invoice_id))];
+  const i = await supabase.from('invoices').select('id, invoice_number').in('id', ids);
+  const numberOf = new Map((i.data || []).map(x => [x.id, x.invoice_number]));
+  return rows
+    .sort((x, y) => String(x.created_at || '').localeCompare(String(y.created_at || '')))
+    .map(r => ({ invoice_number: numberOf.get(r.invoice_id) ?? null, amount: Number(r.amount) || 0, allocated_on: r.allocated_on, note: r.note || null }));
 }
 
 // ── Shell ───────────────────────────────────────────────────────────────────
@@ -90,7 +110,7 @@ export async function downloadCreditNotePdf({ note, invoice, seller, billTo }) {
 // otherwise trap a fixed overlay inside the card. keepOpen stops a stray click
 // outside the card, or an Escape pressed to dismiss autocorrect, from throwing
 // away a half built credit note; the Close button still closes it.
-function Sheet({ title, sub, onClose, busy, children, footer, wide, keepOpen }) {
+export function Sheet({ title, sub, onClose, busy, children, footer, wide, keepOpen }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape' && !busy && !keepOpen) onClose(); };
     window.addEventListener('keydown', onKey);
@@ -121,7 +141,7 @@ function Sheet({ title, sub, onClose, busy, children, footer, wide, keepOpen }) 
 const field = 'w-full r-field !text-[16px] sm:!text-sm disabled:opacity-60';
 const lbl = 'text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-muted mb-1 block';
 
-function Problems({ list }) {
+export function Problems({ list }) {
   if (!list.length) return null;
   return (
     <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
@@ -178,6 +198,9 @@ export default function CreditNoteModal({ invoice, invoiceLines = [], creditedLi
   const totals = creditTotals(lines);
   const left = creditableLeft(invoice);
   const paid = amountPaid(invoice);
+  // Cash plus credit applied to it from other invoices: what the refund is worked out from.
+  const settled = settledAmount(invoice);
+  const applied = Number(invoice.amount_allocated) || 0;
   const refund = refundFor({ invoice, creditTotal: totals.total });
   // The database only limits the whole credit. "Lower a quantity or price" is
   // the rule on screen too (as on posupject), so a copied line cannot go above
@@ -248,7 +271,7 @@ export default function CreditNoteModal({ invoice, invoiceLines = [], creditedLi
 
   return (
     <Sheet wide keepOpen title={`Credit note for ${invLabel}`} busy={busy} onClose={onClose} footer={footer}
-      sub={`Invoice total ${money(invoice.total)}${Number(invoice.amount_credited) > 0 ? ` · already credited ${money(invoice.amount_credited)}` : ''}${paid > 0 ? ` · paid ${money(paid)}` : ''}`}>
+      sub={`Invoice total ${money(invoice.total)}${Number(invoice.amount_credited) > 0 ? ` · already credited ${money(invoice.amount_credited)}` : ''}${paid > 0 ? ` · paid ${money(paid)}` : ''}${applied > 0 ? ` · credit applied ${money(applied)}` : ''}`}>
 
       {/* Lines */}
       <div className="space-y-2">
@@ -335,7 +358,7 @@ export default function CreditNoteModal({ invoice, invoiceLines = [], creditedLi
         {overLimit && <div className="text-xs text-red-600">This credit is more than is left on the invoice. Lower a quantity or price, or remove a line.</div>}
         {refundShown && (
           <div className="text-xs text-amber-deep bg-amber/10 border border-amber/30 rounded-lg px-2.5 py-2 mt-1">
-            {money(paid)} has already been paid, so {money(refund.refund_due)} will be owed back to the customer. Use Mark refunded once it has been paid back.
+            {money(settled)} has already been {applied > 0 ? 'paid or settled by credit' : 'paid'}, so {money(refund.refund_due)} will be credit available to the customer. Refund it with Mark refunded, or apply it to another of their invoices.
           </div>
         )}
       </div>
@@ -370,8 +393,10 @@ export default function CreditNoteModal({ invoice, invoiceLines = [], creditedLi
 
 // ── Mark refunded ───────────────────────────────────────────────────────────
 
-/** Records a refund paid outside the app. Nothing is sent to Stripe. */
+/** Records a refund paid outside the app. Nothing is sent to Stripe. Only the
+ *  credit still available is refunded; credit applied to invoices stays. */
 export function RefundCreditModal({ note, onClose, onDone }) {
+  const use = creditUse(note);
   const [method, setMethod] = useState(REFUND_METHODS[0]);
   const [on, setOn] = useState(localToday());
   const [text, setText] = useState('');
@@ -392,12 +417,19 @@ export function RefundCreditModal({ note, onClose, onDone }) {
   };
 
   return (
-    <Sheet title={`Mark ${creditNoteLabel(note)} refunded`} sub={`Refund owed: ${money(note.refund_due)}`} busy={busy} onClose={onClose}
+    <Sheet title={`Mark ${creditNoteLabel(note)} refunded`} sub={`Credit available to refund: ${money(use.left)}`} busy={busy} onClose={onClose}
       footer={<>
         <button type="button" onClick={onClose} disabled={busy} className="btn-ghost px-4 py-2 rounded-xl text-sm disabled:opacity-50">Cancel</button>
         <button type="button" onClick={save} disabled={busy} className="btn-glass ml-auto px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50">{busy ? 'Saving…' : 'Mark refunded'}</button>
       </>}>
       <div className="text-xs text-muted">Record a refund you have already paid back, by bank transfer or on the card machine. This does not move any money.</div>
+      {/* A note is refunded once (refundProblem), so only credit used on
+          invoices can come before this refund. */}
+      {use.used > 0 && (
+        <div className="text-xs text-amber-deep">
+          {money(use.used)} of this credit has been used on invoices. Only the {money(use.left)} left is refunded.
+        </div>
+      )}
       <div>
         <label className={lbl} htmlFor="cn-method">How it was refunded</label>
         <select id="cn-method" className={field} value={method} onChange={e => setMethod(e.target.value)}>
@@ -450,12 +482,17 @@ export function CancelCreditModal({ note, invoice, notes = [], onClose, onDone }
       <ul className="text-sm text-muted list-disc pl-4 space-y-1">
         <li>It keeps its number and stays on the invoice, struck through.</li>
         <li>It no longer reduces the invoice by {money(note.total)}.</li>
-        {note.refund_status === 'owed' && <li>The refund owed on it ({money(note.refund_due)}) is cleared.</li>}
-        {(effect.refunds || []).map(r => (
-          <li key={r.id}>{r.refund_due > 0
-            ? `The refund owed on ${creditNoteLabel(notes.find(c => c.id === r.id))} drops to ${money(r.refund_due)}.`
-            : `${creditNoteLabel(notes.find(c => c.id === r.id))} no longer owes a refund.`}</li>
-        ))}
+        {creditAvailable(note) > 0 && <li>The credit available on it ({money(creditAvailable(note))}) is cleared.</li>}
+        {(effect.refunds || []).map(r => {
+          const other = notes.find(c => c.id === r.id);
+          // refund_due still holds what the note has used or refunded; what is left of it is the credit available.
+          const left = creditAvailable({ ...other, refund_due: r.refund_due, refund_status: r.refund_status });
+          return (
+            <li key={r.id}>{left > 0
+              ? `The credit available on ${creditNoteLabel(other)} drops to ${money(left)}.`
+              : `${creditNoteLabel(other)} no longer has credit available.`}</li>
+          );
+        })}
         {effect.reopen && (
           <li className="text-amber-deep font-semibold">INV-{invoice.invoice_number} was paid for what was left after this credit, so it goes back to Sent with {money(effect.balance_due)} to pay.</li>
         )}

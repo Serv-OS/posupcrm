@@ -9,7 +9,9 @@
 // line table lands on both documents at once.
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { amountPaid, balanceDue, creditNoteLabel, creditState, creditTotals } from './creditNotes'
+import {
+  amountPaid, balanceDue, creditableLeft, creditNoteLabel, creditNoteStatusLabel, creditState, creditTotals, creditUse, settledAmount,
+} from './creditNotes'
 
 const hexToRgb = (hex) => {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '')
@@ -103,7 +105,7 @@ async function renderDoc({
   if (pill) {
     ry += 4
     doc.setFont('helvetica', 'bold').setFontSize(9)
-    // 78pt fits PAID and OVERDUE; REFUND DUE and CANCELLED need a little more.
+    // 78pt fits PAID and OVERDUE; CREDIT AVAILABLE and CANCELLED need more.
     const pw = Math.max(78, doc.getTextWidth(pill.t) + 20)
     doc.setFillColor(...pill.bg).roundedRect(W - M - pw, ry - 11, pw, 18, 4, 4, 'F')
     doc.setTextColor(...pill.fg).text(pill.t, W - M - pw / 2, ry + 1, { align: 'center' })
@@ -211,18 +213,44 @@ async function renderDoc({
   return doc
 }
 
+// 'CN-1001' from a row, a number, or a label the server already built.
+const cnLabelOf = (note = {}) => {
+  const n = note?.credit_number ?? note?.number
+  return typeof n === 'string' && /^CN-/i.test(n) ? n : creditNoteLabel(n)
+}
+
 const moneyFn = (fmt) => (typeof fmt === 'function' ? fmt : (n) => (Number(n) || 0).toFixed(2))
 
-export async function buildInvoiceDoc({ inv = {}, lines = [], totals = {}, seller = {}, billTo = {}, fmt, taxLabel = 'Tax', dateLocale = 'en-US' }) {
+// Active credit allocations only: a removed one takes nothing off.
+const activeAllocations = (list) => (Array.isArray(list) ? list : [])
+  .filter((a) => a && !a.removed_at && Number(a.amount) > 0)
+
+/**
+ * An invoice as a PDF doc, not saved.
+ *   inv          the invoices row (amount_paid, amount_credited, amount_allocated read off it)
+ *   lines, totals, seller, billTo, fmt, taxLabel, dateLocale  as before
+ *   totals       { subtotal, tax, total, paid?, credited?, allocated? }
+ *   allocations  optional: the credit_allocations applied TO this invoice, as
+ *                [{ credit_number (or number, or credit_note: { credit_number }),
+ *                amount }]. Each prints as "Credit applied CN-1003". Removed
+ *                ones (removed_at set) are left out. Without them, credit applied
+ *                prints as one "Credit applied" row of inv.amount_allocated.
+ */
+export async function buildInvoiceDoc({ inv = {}, lines = [], totals = {}, allocations, seller = {}, billTo = {}, fmt, taxLabel = 'Tax', dateLocale = 'en-US' }) {
   const number = inv.invoice_number ?? inv.number ?? ''
   const status = (inv.status || '').toLowerCase()
   const total = totals.total ?? inv.total ?? 0
 
-  // Credit notes (src/lib/creditNotes.js). With none, everything below reads
-  // exactly as it did before credit notes existed.
+  // Credit notes and credit applied from other invoices' credit notes
+  // (src/lib/creditNotes.js). With neither, everything below reads exactly as
+  // it did before credit notes existed.
   const credited = Number(totals.credited ?? inv.amount_credited) || 0
   const hasCredit = credited > 0
-  const state = { status, total, amount_paid: totals.paid ?? inv.amount_paid, amount_credited: credited }
+  const appliedList = activeAllocations(allocations)
+  const listSum = appliedList.reduce((t, a) => t + Math.round((Number(a.amount) || 0) * 100), 0) / 100
+  const applied = Number(totals.allocated ?? inv.amount_allocated ?? listSum) || 0
+  const hasApplied = applied > 0
+  const state = { status, total, amount_paid: totals.paid ?? inv.amount_paid, amount_credited: credited, amount_allocated: applied }
   const balance = balanceDue(state)
   const paid = amountPaid(state)
   const money = moneyFn(fmt)
@@ -230,8 +258,8 @@ export async function buildInvoiceDoc({ inv = {}, lines = [], totals = {}, selle
   // status pill. Fully credited with nothing paid is not overdue: nothing is owed.
   const pill = status === 'paid'
     ? { t: 'PAID', bg: [209, 250, 229], fg: [6, 95, 70] }
-    : (hasCredit && creditState(state) === 'full' && paid === 0) ? { t: 'CREDITED', bg: [224, 231, 255], fg: [55, 48, 163] }
-      : ((inv.overdue || status === 'overdue') && !(hasCredit && balance === 0)) ? { t: 'OVERDUE', bg: [254, 226, 226], fg: [153, 27, 27] }
+    : (hasCredit && creditState(state) === 'full' && settledAmount(state) === 0) ? { t: 'CREDITED', bg: [224, 231, 255], fg: [55, 48, 163] }
+      : ((inv.overdue || status === 'overdue') && !((hasCredit || hasApplied) && balance === 0)) ? { t: 'OVERDUE', bg: [254, 226, 226], fg: [153, 27, 27] }
         : null
 
   const rows = [
@@ -240,14 +268,25 @@ export async function buildInvoiceDoc({ inv = {}, lines = [], totals = {}, selle
   ]
   const [ar, ag, ab] = hexToRgb(seller.accent)
   rows.push({ label: 'Total', value: total, bold: true, color: [ar, ag, ab], rule: true })
-  if (hasCredit) {
+  if (hasCredit || hasApplied) {
     // The customer pays the balance, so every step to it is shown.
-    rows.push({ label: 'Credited', value: credited, minus: true })
+    if (hasCredit) rows.push({ label: 'Credited', value: credited, minus: true })
+    // Applied credit is a settlement, not cash, so it is its own step.
+    if (appliedList.length) {
+      for (const a of appliedList) {
+        const cn = cnLabelOf(a.credit_note ?? a.credit_notes ?? a)
+        rows.push({ label: cn ? `Credit applied ${cn}` : 'Credit applied', value: Number(a.amount) || 0, minus: true })
+      }
+    } else if (hasApplied) {
+      rows.push({ label: 'Credit applied', value: applied, minus: true })
+    }
     if (paid > 0) rows.push({ label: 'Paid', value: paid, color: [6, 120, 70], minus: true })
     // Paid in full and then credited: the balance stops at 0, so say where the
     // rest went rather than print sums that do not add up. The credit note
-    // itself says whether it has been refunded.
-    const over = paid - (Number(total) - credited)
+    // itself says whether it has been refunded or used. Settled (cash plus
+    // credit applied) against what the invoice asks after its credit notes,
+    // both in pennies, as the public invoice page works it out.
+    const over = settledAmount(state) - creditableLeft(state)
     rows.push({ label: 'Balance due', value: balance, bold: true,
       note: over > 0.005 ? `${money(over)} more was paid than is now owed` : null })
   } else if (status === 'paid') {
@@ -280,10 +319,11 @@ export async function downloadInvoicePdf(data) {
   doc.save(`INV-${number}.pdf`)
 }
 
-// 'CN-1001' from a row, a number, or a label the server already built.
-const cnLabelOf = (note = {}) => {
-  const n = note.credit_number ?? note.number
-  return typeof n === 'string' && /^CN-/i.test(n) ? n : creditNoteLabel(n)
+// 'INV-1050' from a row, a number, or a label the server already built.
+const invLabelOf = (a = {}) => {
+  const n = a.invoice_number ?? a.number ?? a.invoice?.invoice_number ?? a.invoices?.invoice_number
+  if (n == null || n === '') return ''
+  return typeof n === 'string' && /^INV-/i.test(n) ? n : `INV-${n}`
 }
 
 /**
@@ -292,12 +332,19 @@ const cnLabelOf = (note = {}) => {
  * printed as they are, never summed again) and the invoice it credits.
  *   note      credit_notes row: credit_number, issue_date, reason, subtotal,
  *             tax_amount, total, status, refund_status, refund_due,
- *             refunded_at, refund_method, cancelled_at. `number` is read too.
+ *             refunded_at, refund_method, cancelled_at, and amount_allocated
+ *             and refunded_amount, which say where its credit went. `number`
+ *             is read too.
  *   lines     credit_note_lines rows (falls back to note.lines)
  *   invoice   the invoice: invoice_number (or number) and issue_date
+ *   allocations  optional: the note's credit applied to other invoices, as
+ *             [{ invoice_number (or number, or invoice: { invoice_number }),
+ *             amount }]. Each prints as "Applied to invoice INV-1050". Removed
+ *             ones (removed_at set) are left out. Without them, what was
+ *             applied prints as one "Used on other invoices" row.
  *   seller, billTo, fmt, taxLabel, dateLocale  exactly as buildInvoiceDoc
  */
-export async function buildCreditNoteDoc({ note = {}, lines, invoice = {}, seller = {}, billTo = {}, fmt, taxLabel = 'Tax', dateLocale = 'en-US' }) {
+export async function buildCreditNoteDoc({ note = {}, lines, invoice = {}, allocations, seller = {}, billTo = {}, fmt, taxLabel = 'Tax', dateLocale = 'en-US' }) {
   const label = cnLabelOf(note)
   const rows = lines ?? note.lines ?? []
   const invNumber = invoice?.invoice_number ?? invoice?.number ?? note.invoice_number ?? ''
@@ -308,21 +355,45 @@ export async function buildCreditNoteDoc({ note = {}, lines, invoice = {}, selle
   const sums = note.total != null ? null : creditTotals(rows)
   const [ar, ag, ab] = hexToRgb(seller.accent)
 
+  // The chip follows the staff screens' words (creditNoteStatusLabel):
+  // credit available, part used, used or refunded.
+  const status = creditNoteStatusLabel(note)
+  const amber = { bg: [254, 243, 199], fg: [146, 64, 14] }
+  const green = { bg: [209, 250, 229], fg: [6, 95, 70] }
   const pill = cancelled ? { t: 'CANCELLED', bg: [241, 245, 249], fg: [100, 116, 139] }
-    : note.refund_status === 'owed' ? { t: 'REFUND DUE', bg: [254, 243, 199], fg: [146, 64, 14] }
-      : note.refund_status === 'refunded' ? { t: 'REFUNDED', bg: [209, 250, 229], fg: [6, 95, 70] }
-        : null
+    : status === 'Available' ? { t: 'CREDIT AVAILABLE', ...amber }
+      : status === 'Part used' ? { t: 'PART USED', ...amber }
+        : status === 'Used' ? { t: 'USED', ...green }
+          : status === 'Refunded' ? { t: 'REFUNDED', ...green }
+            : null
 
   const totals = [
     { label: 'Subtotal', value: sums ? sums.subtotal : (note.subtotal ?? 0) },
     { label: taxLabel, value: sums ? sums.tax_amount : (note.tax_amount ?? 0) },
     { label: 'Total credited', value: sums ? sums.total : note.total, bold: true, color: [ar, ag, ab], rule: true },
   ]
-  if (!cancelled && note.refund_status === 'owed') {
-    totals.push({ label: 'Refund due', value: note.refund_due ?? 0, bold: true, color: [146, 64, 14] })
-  } else if (!cancelled && note.refund_status === 'refunded') {
-    const how = [note.refunded_at ? fmtDate(note.refunded_at, dateLocale) : '', note.refund_method || ''].filter(Boolean).join(', ')
-    totals.push({ label: 'Refunded', value: note.refund_due ?? 0, color: [6, 120, 70], note: how || null })
+  if (!cancelled) {
+    // Where the money beyond what the invoice asks for went: applied to other
+    // invoices, refunded, or still there to use.
+    const use = creditUse(note)
+    const appliedList = activeAllocations(allocations)
+    if (use.used > 0) {
+      if (appliedList.length) {
+        for (const a of appliedList) {
+          const inv = invLabelOf(a)
+          totals.push({ label: inv ? `Applied to invoice ${inv}` : 'Applied to an invoice', value: Number(a.amount) || 0 })
+        }
+      } else {
+        totals.push({ label: 'Used on other invoices', value: use.used })
+      }
+    }
+    if (use.refunded > 0) {
+      const how = [note.refunded_at ? fmtDate(note.refunded_at, dateLocale) : '', note.refund_method || ''].filter(Boolean).join(', ')
+      totals.push({ label: 'Refunded', value: use.refunded, color: [6, 120, 70], note: how || null })
+    }
+    if (use.left > 0) {
+      totals.push({ label: use.used > 0 || use.refunded > 0 ? 'Credit left' : 'Credit available', value: use.left, bold: true, color: [146, 64, 14] })
+    }
   }
 
   const forInvoice = invNumber

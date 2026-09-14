@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { creditNoteLabel } from '../lib/creditNotes';
+import { creditNoteLabel, creditNoteStatusLabel, creditUse } from '../lib/creditNotes';
 import { creditNotePdf } from '../lib/invoicePdf';
 
 // Public hosted credit note page (/c/<token>), the link in the credit note
@@ -8,6 +8,10 @@ import { creditNotePdf } from '../lib/invoicePdf';
 // longer applies must not be shown to the customer from an old email.
 // The PDF is built here in the browser by the same code the staff screens use,
 // so the customer's copy and ours are the same document.
+// Money the customer had paid beyond what the invoice now asks for is credit
+// on the note. It can be refunded or applied to another invoice, so the page
+// says what happened to it: "Applied to invoice INV-1050" lines, what was
+// refunded, and the credit left (creditUse in src/lib/creditNotes.js).
 // A static import on purpose: a click-time import() of the PDF code breaks
 // after a redeploy on this app's catch-all rewrite.
 
@@ -50,8 +54,22 @@ export default function PublicCreditNote({ token }) {
   const accent = seller.accent || '#15C26A';
   const label = cnLabel(note.number ?? note.credit_number);
   const invNumber = invoice.number ?? invoice.invoice_number;
-  const refund = note.refund_status;
   const balance = invoice.balance_due != null ? Math.max(0, Number(invoice.balance_due) || 0) : null;
+  // Where the credit went. Before credit-note-public sends applied_to, or the
+  // columns behind it exist, a refunded note reads as all of it refunded.
+  const appliedTo = (data.applied_to || []).filter((a) => Number(a?.amount) > 0);
+  const use = creditUse(note);
+  const status = creditNoteStatusLabel(note);
+  const invLabel = (n) => (typeof n === 'string' && /^INV-/i.test(n) ? n : `INV-${n}`);
+  const refundedHow = [
+    note.refunded_at ? `on ${fmtDate(note.refunded_at)}` : '',
+    note.refund_method && note.refund_method !== 'Other' ? `by ${note.refund_method.toLowerCase()}` : '',
+  ].filter(Boolean).join(' ');
+  // One simple box when only one thing happened; a list when the credit was
+  // applied to invoices, or part refunded and part left.
+  const onlyLeft = use.left > 0 && use.used === 0 && use.refunded === 0;
+  const onlyRefunded = use.refunded > 0 && use.used === 0 && use.left === 0;
+  const showList = !onlyLeft && !onlyRefunded && (use.used > 0 || use.refunded > 0 || use.left > 0);
 
   const downloadPdf = async () => {
     setPdfBusy(true); setPdfError('');
@@ -59,6 +77,7 @@ export default function PublicCreditNote({ token }) {
       await creditNotePdf({
         note,
         lines: items,
+        allocations: appliedTo,
         invoice: { number: invNumber, issue_date: invoice.issue_date },
         seller,
         billTo: {
@@ -89,11 +108,13 @@ export default function PublicCreditNote({ token }) {
             <div className="text-xs text-slate-500 mt-1">Issued {fmtDate(note.issue_date)}</div>
             {invNumber != null && invNumber !== '' && <div className="text-xs text-slate-500">For invoice INV-{invNumber}</div>}
             <div className="mt-2">
-              {refund === 'owed'
-                ? <Badge bg="#fef3c7" color="#92400e">Refund due</Badge>
-                : refund === 'refunded'
-                  ? <Badge bg="#d1fae5" color="#065f46">Refunded</Badge>
-                  : <Badge bg="#e0e7ff" color="#3730a3">Issued</Badge>}
+              {status === 'Available'
+                ? <Badge bg="#fef3c7" color="#92400e">Credit available</Badge>
+                : status === 'Part used'
+                  ? <Badge bg="#fef3c7" color="#92400e">Part used</Badge>
+                  : status === 'Used' || status === 'Refunded'
+                    ? <Badge bg="#d1fae5" color="#065f46">{status}</Badge>
+                    : <Badge bg="#e0e7ff" color="#3730a3">Issued</Badge>}
             </div>
           </div>
         </div>
@@ -157,19 +178,66 @@ export default function PublicCreditNote({ token }) {
           </div>
         </div>
 
-        {/* What it means for the customer: a refund, or what is left on the invoice */}
+        {/* What it means for the customer: credit to use, where it went, or what is left on the invoice */}
         <div className="px-5 sm:px-8 pb-6 space-y-3">
-          {refund === 'owed' && (
+          {onlyLeft && (
             <div className="rounded-xl p-4 text-center" style={{ background: '#fffbeb', color: '#92400e' }}>
-              <div className="font-semibold">A refund of {money(note.refund_due)} is due to you</div>
-              <div className="text-xs mt-0.5">You had already paid more than the invoice now asks for.</div>
+              <div className="font-semibold">{money(use.left)} credit available</div>
+              <div className="text-xs mt-0.5">You had already paid more than the invoice now asks for. We can refund it to you or take it off another invoice.</div>
             </div>
           )}
-          {refund === 'refunded' && (
+          {onlyRefunded && (
             <div className="rounded-xl p-4 text-center font-semibold" style={{ background: '#ecfdf5', color: '#065f46' }}>
-              ✓ {money(note.refund_due)} refunded
-              {note.refunded_at ? ` on ${fmtDate(note.refunded_at)}` : ''}
-              {note.refund_method && note.refund_method !== 'Other' ? ` by ${note.refund_method.toLowerCase()}` : ''}
+              ✓ {money(use.refunded)} refunded{refundedHow ? ` ${refundedHow}` : ''}
+            </div>
+          )}
+          {showList && (
+            <div className="rounded-xl border border-slate-200 text-sm">
+              <div className="px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Your credit</div>
+              <div className="divide-y divide-slate-100">
+                {appliedTo.map((a, i) => (
+                  <div key={`applied-${i}`} className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <div className="min-w-0">
+                      <div className="text-slate-800">
+                        Applied to invoice{' '}
+                        {a.invoice_number != null && a.invoice_number !== ''
+                          ? (a.public_token
+                            ? <a href={`/i/${encodeURIComponent(a.public_token)}`} className="font-semibold underline underline-offset-2" style={{ color: accent }}>{invLabel(a.invoice_number)}</a>
+                            : <span className="font-semibold">{invLabel(a.invoice_number)}</span>)
+                          : null}
+                      </div>
+                      {a.date && <div className="text-xs text-slate-500">{fmtDate(a.date)}</div>}
+                    </div>
+                    <span className="tabular-nums text-slate-800 shrink-0">{money(a.amount)}</span>
+                  </div>
+                ))}
+                {use.used > 0 && !appliedTo.length && (
+                  <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <div className="text-slate-800 min-w-0">Used on other invoices</div>
+                    <span className="tabular-nums text-slate-800 shrink-0">{money(use.used)}</span>
+                  </div>
+                )}
+                {use.refunded > 0 && (
+                  <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <div className="min-w-0">
+                      <div className="text-slate-800">Refunded to you</div>
+                      {refundedHow && <div className="text-xs text-slate-500">{refundedHow.charAt(0).toUpperCase() + refundedHow.slice(1)}</div>}
+                    </div>
+                    <span className="tabular-nums text-slate-800 shrink-0">{money(use.refunded)}</span>
+                  </div>
+                )}
+                {use.left > 0 ? (
+                  <div className="px-4 py-2.5" style={{ background: '#fffbeb' }}>
+                    <div className="flex items-start justify-between gap-3 font-semibold" style={{ color: '#92400e' }}>
+                      <span>Credit left</span>
+                      <span className="tabular-nums shrink-0">{money(use.left)}</span>
+                    </div>
+                    <div className="text-xs mt-0.5" style={{ color: '#92400e' }}>We can refund it to you or take it off another invoice.</div>
+                  </div>
+                ) : use.refunded === 0 && (
+                  <div className="px-4 py-2.5 font-semibold" style={{ background: '#ecfdf5', color: '#065f46' }}>✓ All of this credit has been used</div>
+                )}
+              </div>
             </div>
           )}
 

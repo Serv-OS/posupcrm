@@ -1,9 +1,11 @@
 // Public invoice endpoint (no auth). GET ?token=... -> invoice + lines +
-// seller branding + customer details for the hosted invoice page (/i/<token>).
+// seller branding + customer details for the hosted invoice page (/i/<token>),
+// with the credit notes raised on it and the credit applied to it from other
+// invoices' credit notes, so the page can show each step down to the balance.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { balanceDue } from "../_shared/invoiceEmail.ts";
+import { amountAllocatedOn, balanceDue, sameCustomer } from "../_shared/invoiceEmail.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -23,7 +25,7 @@ serve(async (req) => {
     const { data: inv } = await supabase.from("invoices").select("*").eq("public_token", token).maybeSingle();
     if (!inv || inv.status === "void") return json({ error: "Invoice not found" }, 404);
 
-    const [{ data: items }, { data: company }, { data: contact }, { data: location }, { data: settings }, { data: credits }] = await Promise.all([
+    const [{ data: items }, { data: company }, { data: contact }, { data: location }, { data: settings }, { data: credits }, { data: applied }] = await Promise.all([
       supabase.from("invoice_line_items").select("*").eq("invoice_id", inv.id).order("sort"),
       inv.company_id ? supabase.from("companies").select("name, address, city, postcode").eq("id", inv.company_id).maybeSingle() : Promise.resolve({ data: null }),
       inv.contact_id ? supabase.from("contacts").select("first_name, last_name, email").eq("id", inv.contact_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -33,13 +35,20 @@ serve(async (req) => {
       // credit notes migration is applied this query errors and shows none.
       supabase.from("credit_notes").select("credit_number, issue_date, total, public_token")
         .eq("invoice_id", inv.id).eq("status", "issued").order("credit_number"),
+      // Credit applied to this invoice, active only: removed credit takes
+      // nothing off. Until the credit allocations migration is applied this
+      // query errors and shows none.
+      supabase.from("credit_allocations")
+        .select("amount, allocated_on, created_at, credit_note:credit_notes(credit_number, public_token, status, company_id, contact_id)")
+        .eq("invoice_id", inv.id).is("removed_at", null).order("created_at"),
     ]);
 
     if (inv.status === "sent") await supabase.from("invoices").update({ status: "viewed" }).eq("id", inv.id);
 
     const s = settings || {};
-    // What the Pay button charges (invoice-checkout uses the same balanceDue).
-    // An invoice credited down to nothing left to pay is not overdue.
+    // What the Pay button charges (invoice-checkout uses the same balanceDue):
+    // payments, credit notes and applied credit all come off. An invoice
+    // credited down to nothing left to pay is not overdue.
     const balance = balanceDue(inv);
     const overdue = !!inv.due_date && new Date(inv.due_date) < new Date(new Date().toDateString()) && !["paid", "void"].includes(inv.status) && balance > 0;
     return json({
@@ -48,7 +57,8 @@ serve(async (req) => {
         po_number: inv.po_number || null,
         tax_rate: inv.tax_rate, subtotal: inv.subtotal, tax_amount: inv.tax_amount, total: inv.total,
         terms: inv.terms || s.invoice_terms || "", notes: inv.notes || "", paid_at: inv.paid_at,
-        amount_paid: inv.amount_paid, amount_credited: Number(inv.amount_credited) || 0, balance_due: balance, overdue,
+        amount_paid: inv.amount_paid, amount_credited: Number(inv.amount_credited) || 0,
+        amount_allocated: amountAllocatedOn(inv), balance_due: balance, overdue,
       },
       seller: {
         name: s.business_name || "ServOS", address: s.business_address || "",
@@ -60,6 +70,16 @@ serve(async (req) => {
       location: location ? { name: location.name, address: [location.address, location.city, location.postcode].filter(Boolean).join(", ") } : null,
       items: items || [],
       credit_notes: (credits || []).map((c: any) => ({ number: c.credit_number, issue_date: c.issue_date, total: c.total, public_token: c.public_token })),
+      // "Credit applied CN-1003" rows. The credit note belongs to another
+      // invoice, which can be another customer's (a group paying across its
+      // companies), so its link is only given when it is this customer's own
+      // (sameCustomer) and its page still opens.
+      credit_applied: (applied || []).map((a: any) => ({
+        number: a.credit_note?.credit_number ?? null,
+        date: a.allocated_on,
+        amount: Number(a.amount) || 0,
+        public_token: a.credit_note && a.credit_note.status === "issued" && sameCustomer(a.credit_note, inv) ? a.credit_note.public_token || null : null,
+      })),
     });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);

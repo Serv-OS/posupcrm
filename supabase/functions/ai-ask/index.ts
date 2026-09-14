@@ -17,7 +17,7 @@
 //    else. Never assume RLS is protecting you inside an edge function.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { balanceDue } from "../_shared/invoiceEmail.ts";
+import { amountAllocatedOn, balanceDue, creditUseOn } from "../_shared/invoiceEmail.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -82,13 +82,15 @@ async function supportContext(): Promise<string[]> {
   return lines;
 }
 
-// Invoices that still ask for money. Payments and issued credit notes both come
-// off (balanceDue, the rule the invoice screens and invoice-checkout use), so a
-// credited invoice is never offered up as one to chase. select("*") rather than
-// named columns: amount_credited only exists once the credit notes migration is
-// applied, and posupcrm's invoices have no currency column, and naming a column
-// that is not there fails the whole query (it read as no unpaid invoices).
-// Only the fields below reach the prompt.
+// Invoices that still ask for money. Payments, issued credit notes and credit
+// applied from other invoices' credit notes all come off (balanceDue, the rule
+// the invoice screens and invoice-checkout use), so a credited invoice, or one
+// settled by applied credit, is never offered up as one to chase. select("*")
+// rather than named columns: amount_credited and amount_allocated only exist
+// once the credit notes and credit allocations migrations are applied, and
+// posupcrm's invoices have no currency column, and naming a column that is not
+// there fails the whole query (it read as no unpaid invoices). Only the fields
+// below reach the prompt.
 async function unpaidInvoices() {
   const { data } = await admin.from("invoices").select("*").in("status", ["sent", "viewed"]).limit(50);
   return { data: (data || []).filter((i: any) => balanceDue(i) > 0) };
@@ -113,7 +115,7 @@ async function overviewContext(isOwner: boolean): Promise<string[]> {
     `DEALS: ${(deals || []).length} open.` + (deals || []).slice(0, 10).map((d) =>
       `\n  - ${clip(d.name, 60)} | ${d.stage} | ${d.currency || "GBP"} ${d.value ?? "?"}${d.expected_close_date ? ` | expected ${d.expected_close_date}` : ""}`).join(""),
     `UNPAID INVOICES: ${(invoices || []).length}.` + (invoices || []).slice(0, 10).map((i) =>
-      `\n  - INV-${i.invoice_number} | ${i.currency || "GBP"} ${balanceDue(i)} due${balanceDue(i) !== Number(i.total) ? ` of ${i.total}` : ""} | ${i.status}${i.due_date ? ` | due ${i.due_date}${i.due_date < today ? " (OVERDUE)" : ""}` : ""}`).join(""),
+      `\n  - INV-${i.invoice_number} | ${i.currency || "GBP"} ${balanceDue(i)} due${balanceDue(i) !== Number(i.total) ? ` of ${i.total}` : ""}${amountAllocatedOn(i) > 0 ? ` (${amountAllocatedOn(i)} credit applied)` : ""} | ${i.status}${i.due_date ? ` | due ${i.due_date}${i.due_date < today ? " (OVERDUE)" : ""}` : ""}`).join(""),
     `ONBOARDINGS IN FLIGHT: ${(onboardings || []).length}.` + (onboardings || []).slice(0, 10).map((o) =>
       `\n  - stage ${o.stage}${o.go_live_date ? ` | go live ${o.go_live_date}` : ""}`).join(""),
     `OPEN TASKS: ${(tasks || []).length}.` + (tasks || []).slice(0, 10).map((t) =>
@@ -155,21 +157,37 @@ async function ticketContext(id: string): Promise<string[]> {
 }
 
 async function companyContext(id: string): Promise<string[]> {
-  const [{ data: c }, { data: tickets }, { data: deals }, { data: invoices }, { data: sites }] = await Promise.all([
+  const [{ data: c }, { data: tickets }, { data: deals }, { data: invoices }, { data: sites }, { data: notes }] = await Promise.all([
     admin.from("companies").select("*").eq("id", id).maybeSingle(),
     admin.from("tickets").select("ticket_number, subject, stage, created_at").eq("company_id", id).order("created_at", { ascending: false }).limit(25),
     admin.from("deals").select("name, stage, value, currency").eq("company_id", id).limit(20),
-    admin.from("invoices").select("invoice_number, total, status, due_date, currency").eq("company_id", id).order("issue_date", { ascending: false }).limit(20),
+    // select("*") for the reason given at unpaidInvoices: naming currency (not
+    // a column here) or amount_allocated before its migration fails the query.
+    admin.from("invoices").select("*").eq("company_id", id).order("issue_date", { ascending: false }).limit(20),
     admin.from("locations").select("name, city").eq("company_id", id).limit(40),
+    // Credit notes with credit still to use (refund owed). select("*") so the
+    // columns from the credit allocations migration read as 0 before it.
+    admin.from("credit_notes").select("*").eq("company_id", id).eq("status", "issued").eq("refund_status", "owed")
+      .order("credit_number").limit(20),
   ]);
   if (!c) return ["Company not found."];
+  // Balance due is what the customer still owes after payments, credit notes
+  // and credit applied from other invoices; a void invoice owes nothing.
+  const owed = (i: any) => (["sent", "viewed"].includes(i.status) ? balanceDue(i) : 0);
+  const credit = (notes || []).map((n: any) => ({ n, use: creditUseOn(n) })).filter((x) => x.use.left > 0);
+  const creditTotal = Math.round(credit.reduce((sum, x) => sum + Math.round(x.use.left * 100), 0)) / 100;
   return [
     `CUSTOMER: ${c.name}`,
     `SITES (${(sites || []).length}): ${(sites || []).map((s) => s.name).join(", ") || "none"}`,
     `TICKETS (most recent ${(tickets || []).length}):`,
     ...(tickets || []).map((t) => `- #${t.ticket_number} "${clip(t.subject, 80)}" | ${t.stage} | ${ago(t.created_at)}`),
     `DEALS:`, ...(deals || []).map((d) => `- ${clip(d.name, 60)} | ${d.stage} | ${d.currency || "GBP"} ${d.value ?? "?"}`),
-    `INVOICES:`, ...(invoices || []).map((i) => `- INV-${i.invoice_number} | ${i.currency || "GBP"} ${i.total} | ${i.status}${i.due_date ? ` | due ${i.due_date}` : ""}`),
+    `INVOICES:`, ...(invoices || []).map((i: any) =>
+      `- INV-${i.invoice_number} | ${i.currency || "GBP"} ${i.total} | ${i.status} | balance due ${owed(i)}` +
+      `${amountAllocatedOn(i) > 0 ? ` (${amountAllocatedOn(i)} credit applied)` : ""}${i.due_date ? ` | due ${i.due_date}` : ""}`),
+    `CREDIT AVAILABLE: ${credit.length ? `GBP ${creditTotal}, not yet refunded or applied to an invoice` : "none"}`,
+    ...credit.map(({ n, use }) =>
+      `- CN-${n.credit_number} | GBP ${use.left} left${use.used > 0 ? ` | ${use.used} applied to invoices` : ""}${use.refunded > 0 ? ` | ${use.refunded} refunded` : ""}`),
   ];
 }
 

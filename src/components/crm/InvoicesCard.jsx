@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Receipt, Repeat } from 'lucide-react';
 import { money, invStatus, INV_BADGE, creditMark, CN_BADGE } from './InvoicesPanel.jsx';
-import { balanceDue, creditNoteLabel, creditNoteStatusLabel } from '../../lib/creditNotes';
+import { balanceDue, companyCreditAvailable, creditNoteLabel, creditNoteStatusLabel } from '../../lib/creditNotes';
 
 // Invoices associated with a record. Pass exactly one of companyId /
 // locationId / contactId. "+ New" raises a draft pre-associated to the record.
@@ -10,6 +10,9 @@ export default function InvoicesCard({ companyId, locationId, contactId, profile
   const [invoices, setInvoices] = useState([]);
   const [recurringCount, setRecurringCount] = useState(0);
   const [credits, setCredits] = useState([]);   // credit notes on the invoices shown
+  // Credit available across ALL this record's credit notes, not just those on
+  // the invoices shown: what they can have refunded or use on an invoice.
+  const [creditLeft, setCreditLeft] = useState(0);
   const canWrite = profile?.role === 'owner' || profile?.role === 'editor';
 
   const field = locationId ? 'location_id' : contactId ? 'contact_id' : 'company_id';
@@ -25,10 +28,22 @@ export default function InvoicesCard({ companyId, locationId, contactId, profile
         // invoice it was raised from. No table yet (migration not applied)
         // just means no credit notes to show.
         if (!rows.length) { setCredits([]); return; }
-        const cn = await supabase.from('credit_notes').select('id, credit_number, invoice_id, total, status, refund_status, issue_date')
-          .in('invoice_id', rows.map(i => i.id)).order('credit_number');
+        const ids = rows.map(i => i.id);
+        // amount_allocated tells Available from Part used. Before the credit
+        // allocations migration it is not there, so the notes are read without it.
+        let cn = await supabase.from('credit_notes').select('id, credit_number, invoice_id, total, status, refund_status, refund_due, amount_allocated, refunded_amount, issue_date')
+          .in('invoice_id', ids).order('credit_number');
+        if (cn.error) {
+          cn = await supabase.from('credit_notes').select('id, credit_number, invoice_id, total, status, refund_status, issue_date')
+            .in('invoice_id', ids).order('credit_number');
+        }
         setCredits(cn.error ? [] : (cn.data || []));
       });
+    // Credit notes copy the company, site and contact from their invoice, so
+    // they can be read by the same field. Nothing shows before the migration.
+    supabase.from('credit_notes').select('id, status, refund_status, refund_due, amount_allocated, refunded_amount')
+      .eq(field, value).eq('status', 'issued').eq('refund_status', 'owed')
+      .then(r => setCreditLeft(r.error ? 0 : companyCreditAvailable(r.data || [])));
     supabase.from('recurring_invoices').select('id', { count: 'exact', head: true }).eq(field, value).eq('active', true)
       .then(r => setRecurringCount(r.count || 0));
   }, [field, value]);
@@ -45,7 +60,7 @@ export default function InvoicesCard({ companyId, locationId, contactId, profile
     onNavigate?.('invoice', data.id);
   };
 
-  // What is still owed after payments and credit notes, not the face value.
+  // What is still owed after payments, credit notes and credit applied, not the face value.
   const outstanding = invoices.filter(i => !['paid', 'void', 'draft'].includes(i.status)).reduce((s, i) => s + balanceDue(i), 0);
 
   return (
@@ -90,6 +105,11 @@ export default function InvoicesCard({ companyId, locationId, contactId, profile
         {outstanding > 0 && (
           <div className="px-4 py-2 text-[11px] text-muted flex justify-between">
             <span>Outstanding</span><span className="font-semibold text-paper tabular-nums">{money(outstanding)}</span>
+          </div>
+        )}
+        {creditLeft > 0 && (
+          <div className="px-4 py-2 text-[11px] text-amber-deep flex justify-between" title="Credit from credit notes that can be refunded or used on one of their invoices">
+            <span>Credit available</span><span className="font-semibold tabular-nums">{money(creditLeft)}</span>
           </div>
         )}
       </div>

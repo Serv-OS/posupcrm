@@ -121,10 +121,13 @@ serve(async (req) => {
         const sched: any = (inv as any).recurring;
         if (!sched?.auto_send) continue;
         // Never bill a customer for nothing. This pass only emails drafts, and
-        // issue_credit_note refuses drafts, so today no draft carries credit;
-        // this is here so that stays true if that ever changes. A skipped one
-        // stays a draft, and the stuck-send alert below puts it in front of an owner.
-        if (Number(inv.amount_credited) > 0 && balanceDue(inv) <= 0) continue;
+        // issue_credit_note and allocate_credit both refuse drafts, so today no
+        // draft carries a credit note or applied credit; this is here so that
+        // stays true if that ever changes. The balance is the one the pay page
+        // charges (after payments, credit notes and applied credit). A skipped
+        // one stays a draft, and the stuck-send alert below puts it in front
+        // of an owner.
+        if ((Number(inv.amount_credited) > 0 || Number(inv.amount_allocated) > 0) && balanceDue(inv) <= 0) continue;
         let recipient = (sched.email_to || "").trim();
         if (!recipient && sched.contact_id) {
           const { data: c } = await supabase.from("contacts").select("email").eq("id", sched.contact_id).maybeSingle();

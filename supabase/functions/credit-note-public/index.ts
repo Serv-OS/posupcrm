@@ -2,10 +2,13 @@
 // + the invoice it credits + seller branding + customer details for the hosted
 // credit note page (/c/<token>). Shaped like invoice-public so the two pages
 // read the same way. The unguessable token is the auth, as it is for invoices.
+// It also sends where the note's credit went: the invoices it was applied to
+// (active credit allocations only) and what was refunded, so the page and its
+// PDF can show "Applied to invoice INV-1050" lines and the credit left.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { balanceDue } from "../_shared/invoiceEmail.ts";
+import { balanceDue, sameCustomer } from "../_shared/invoiceEmail.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -27,13 +30,18 @@ serve(async (req) => {
     // link stops showing it, the same way a void invoice's link does.
     if (!note || note.status !== "issued") return json({ error: "Credit note not found" }, 404);
 
-    const [{ data: items }, { data: inv }, { data: company }, { data: contact }, { data: location }, { data: settings }] = await Promise.all([
+    const [{ data: items }, { data: inv }, { data: company }, { data: contact }, { data: location }, { data: settings }, { data: applied }] = await Promise.all([
       supabase.from("credit_note_lines").select("id, name, description, qty, unit_price, tax_rate, sort").eq("credit_note_id", note.id).order("sort"),
       supabase.from("invoices").select("*").eq("id", note.invoice_id).maybeSingle(),
       note.company_id ? supabase.from("companies").select("name, address, city, postcode").eq("id", note.company_id).maybeSingle() : Promise.resolve({ data: null }),
       note.contact_id ? supabase.from("contacts").select("first_name, last_name, email").eq("id", note.contact_id).maybeSingle() : Promise.resolve({ data: null }),
       note.location_id ? supabase.from("locations").select("name, address, city, postcode").eq("id", note.location_id).maybeSingle() : Promise.resolve({ data: null }),
       supabase.from("support_settings").select("business_name, business_address, business_email, business_phone, quote_accent, logo_url").eq("id", 1).maybeSingle(),
+      // Until the credit allocations migration is applied this query errors
+      // and shows none.
+      supabase.from("credit_allocations")
+        .select("amount, allocated_on, created_at, invoice:invoices(invoice_number, public_token, status, company_id, contact_id)")
+        .eq("credit_note_id", note.id).is("removed_at", null).order("created_at"),
     ]);
 
     const s = settings || {};
@@ -46,7 +54,23 @@ serve(async (req) => {
         subtotal: note.subtotal, tax_amount: note.tax_amount, total: note.total,
         refund_status: note.refund_status, refund_due: note.refund_due,
         refunded_at: note.refunded_at, refund_method: note.refund_method,
+        // Of refund_due: applied to invoices, and refunded. null (not 0) when
+        // the columns are not there yet, so the page reads an old refund as
+        // the whole refund_due.
+        amount_allocated: note.amount_allocated != null ? Number(note.amount_allocated) || 0 : null,
+        refunded_amount: note.refunded_amount != null ? Number(note.refunded_amount) || 0 : null,
       },
+      // The invoices this note's credit was applied to. Such an invoice can be
+      // another customer's (a group paying across its companies), so only its
+      // number and the amount are shown, and its link only when it is this
+      // customer's own (sameCustomer) and its page still opens.
+      applied_to: (applied || []).map((a: any) => ({
+        invoice_number: a.invoice?.invoice_number ?? null,
+        date: a.allocated_on,
+        amount: Number(a.amount) || 0,
+        public_token: a.invoice && !["void", "draft"].includes(a.invoice.status) && sameCustomer(a.invoice, note)
+          ? a.invoice.public_token || null : null,
+      })),
       invoice: inv ? {
         number: inv.invoice_number, issue_date: inv.issue_date, due_date: inv.due_date, po_number: inv.po_number || null,
         total: inv.total, amount_credited: Number(inv.amount_credited) || 0,

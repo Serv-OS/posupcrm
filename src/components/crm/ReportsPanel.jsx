@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { BarChart3, ArrowUpDown } from 'lucide-react';
 import { money, invStatus } from './InvoicesPanel.jsx';
-import { balanceDue } from '../../lib/creditNotes';
+import { amountPaid, balanceDue, creditUse } from '../../lib/creditNotes';
 
 // ── date helpers ────────────────────────────────────────────────────────────
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -13,15 +13,21 @@ const addMonths = (d, n) => { const x = new Date(d); x.setMonth(x.getMonth() + n
 const inRange = (dstr, from, to) => { const d = (dstr || '').slice(0, 10); return !!d && d >= from && d <= to; };
 const acctDate = (i) => (i.issue_date || i.created_at || '').slice(0, 10);   // when invoiced
 const billed = (i) => Number(i.total || 0);
-// Still outstanding: the total less payments less issued credit notes.
+// Still outstanding: the total less payments, issued credit notes and credit
+// applied from other invoices' credit notes.
 const owed = (i) => balanceDue(i);
 const credited = (c) => Number(c.total || 0);
-const collectedAmt = (i) => Number(i.amount_paid ?? i.total ?? 0);
+// Cash only. Credit applied from another invoice's credit note settles an
+// invoice but is not money in (nor revenue: the credit note already took it
+// off Invoiced), so a paid invoice with no amount_paid counts its total less
+// that credit. An unpaid one with no amount_paid keeps the old reading.
+const collectedAmt = (i) => (i.amount_paid == null && i.status !== 'paid' ? Number(i.total || 0) : amountPaid(i));
 // Money handed back on a credit note comes off Collected in the period it was
 // refunded: a March payment refunded in April still counts in March, and April
-// shows the money going back out.
-const isRefunded = (c) => c.refund_status === 'refunded' && !!c.refunded_at;
-const refunded = (c) => Number(c.refund_due || 0);
+// shows the money going back out. Only what was refunded counts, not credit
+// the note applied to another invoice.
+const isRefunded = (c) => !!c.refunded_at && creditUse(c).refunded > 0;
+const refunded = (c) => creditUse(c).refunded;
 
 // ── tiny UI atoms (match the codebase idiom) ────────────────────────────────
 function Stat({ label, value, tone, sub }) {
@@ -63,19 +69,25 @@ export default function ReportsPanel({ profile, onNavigate }) {
   useEffect(() => { (async () => {
     setLoading(true);
     const cols = 'id, invoice_number, total, amount_paid, status, paid_at, due_date, issue_date, created_at, company_id, location_id, company:companies(name), location:locations(name)';
+    const cnCols = 'id, invoice_id, total, issue_date, refund_status, refund_due, refunded_at';
     const [inv, co, cn] = await Promise.all([
-      supabase.from('invoices').select(`${cols}, amount_credited`).order('issue_date', { ascending: false }),
+      supabase.from('invoices').select(`${cols}, amount_credited, amount_allocated`).order('issue_date', { ascending: false }),
       supabase.from('companies').select('id, name').order('name'),
-      supabase.from('credit_notes').select('id, invoice_id, total, issue_date, refund_status, refund_due, refunded_at').eq('status', 'issued'),
+      supabase.from('credit_notes').select(`${cnCols}, amount_allocated, refunded_amount`).eq('status', 'issued'),
     ]);
-    // Before the credit notes migration there is no amount_credited column and
-    // the query above fails; read the invoices without it rather than showing
-    // an empty report.
-    const invRows = inv.error
-      ? (await supabase.from('invoices').select(cols).order('issue_date', { ascending: false })).data
-      : inv.data;
+    // Before the credit notes migration there is no amount_credited column,
+    // and before the credit allocations one no amount_allocated, and the
+    // queries above fail; read without them rather than show an empty report.
+    let invRows = inv.data;
+    if (inv.error) {
+      const withCredit = await supabase.from('invoices').select(`${cols}, amount_credited`).order('issue_date', { ascending: false });
+      invRows = withCredit.error
+        ? (await supabase.from('invoices').select(cols).order('issue_date', { ascending: false })).data
+        : withCredit.data;
+    }
     setInvoices(invRows || []);
-    setCreditNotes(cn.error ? [] : (cn.data || []));
+    const cnRows = cn.error ? await supabase.from('credit_notes').select(cnCols).eq('status', 'issued') : cn;
+    setCreditNotes(cnRows.error ? [] : (cnRows.data || []));
     setCompanies(co.data || []);
     // Money-out (bills + expenses) only exists on the £ finance module. Query
     // guarded — the table simply won't exist on the construction CRMs.
@@ -114,6 +126,9 @@ export default function ReportsPanel({ profile, onNavigate }) {
   const collectedPeriod = scoped.filter(i => i.paid_at && inRange(i.paid_at, from, to)).reduce((s, i) => s + collectedAmt(i), 0) - refundedPeriod;
   const outPeriod = outScoped.filter(o => o.paid_at && inRange(o.paid_at, from, to)).reduce((s, o) => s + Number(o.amount_paid ?? o.total ?? 0), 0);
   const outstandingNow = scoped.filter(i => ['sent', 'viewed'].includes(i.status)).reduce((s, i) => s + owed(i), 0);
+  // Credit applied to invoices still open: already off Outstanding, said so under it.
+  const appliedOpen = scoped.filter(i => ['sent', 'viewed'].includes(i.status)).reduce((s, i) => s + (Number(i.amount_allocated) || 0), 0);
+  const anyApplied = scoped.some(i => Number(i.amount_allocated) > 0);
   const overdueNow = scoped.filter(i => invStatus(i) === 'overdue').reduce((s, i) => s + owed(i), 0);
 
   // ── monthly series (invoiced vs collected [vs out]) across the range ──
@@ -235,8 +250,8 @@ export default function ReportsPanel({ profile, onNavigate }) {
           <Stat label="Invoiced (period)" value={money(invoicedPeriod)} tone="accent"
             sub={creditedPeriod > 0 ? `${from} → ${to} · after ${money(creditedPeriod)} of credit notes` : `${from} → ${to}`} />
           <Stat label="Collected (period)" value={money(collectedPeriod)} tone="good"
-            sub={refundedPeriod > 0 ? `Payments received, less ${money(refundedPeriod)} refunded` : 'Payments received'} />
-          <Stat label="Outstanding (now)" value={money(outstandingNow)} sub="Sent, not yet paid" />
+            sub={`${refundedPeriod > 0 ? `Payments received, less ${money(refundedPeriod)} refunded` : 'Payments received'}${anyApplied ? '. Credit applied is not counted' : ''}`} />
+          <Stat label="Outstanding (now)" value={money(outstandingNow)} sub={appliedOpen > 0 ? `Sent, not yet paid · after ${money(appliedOpen)} of credit applied` : 'Sent, not yet paid'} />
           <Stat label="Overdue (now)" value={money(overdueNow)} tone="bad" sub="Past due date" />
         </div>
         {hasOut && (

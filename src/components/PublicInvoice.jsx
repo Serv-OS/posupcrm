@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
-import { amountPaid, balanceDue, creditNoteLabel, creditState } from '../lib/creditNotes';
+import { amountPaid, balanceDue, creditableLeft, creditNoteLabel, creditState, settledAmount } from '../lib/creditNotes';
 
 // Public hosted invoice page (/i/<token>). Branded from support_settings,
 // customer pays by card via Stripe Checkout. Credit notes raised against the
-// invoice are listed with links to their own pages (/c/<token>), and the Pay
-// button asks for what is left after them, never the full total.
+// invoice are listed with links to their own pages (/c/<token>). Credit applied
+// to it from another invoice's credit note shows as a "Credit applied CN-1003"
+// row above the balance. The Pay button asks for what is left after all of
+// them, never the full total.
 
 const FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 const money = (v) => `£${Number(v || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// A real minus sign for the steps down to the balance.
+const minus = (v) => `\u2212${money(v)}`;
 // A bare date ('2026-09-12') is read as local midnight. new Date() on its own
 // reads it as midnight UTC, which shows the day before anywhere west of London.
 const fmtDate = (d) => d ? new Date(String(d).length <= 10 ? `${d}T00:00:00` : d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
@@ -58,19 +62,30 @@ export default function PublicInvoice({ token }) {
   const credits = data.credit_notes || inv.credit_notes || [];
   const credited = Number(inv.amount_credited) || 0;
   const hasCredit = credited > 0;
-  const balance = inv.balance_due != null ? Math.max(0, Number(inv.balance_due) || 0) : balanceDue(inv);
-  const paidSoFar = amountPaid(inv);
+  // Credit applied from other invoices' credit notes: a settlement, not cash,
+  // so it is its own step and never part of "Paid". invoice-public sends one
+  // row per credit note; if the rows are missing but the invoice carries the
+  // sum, that sum shows as one row so the steps still add up.
+  const appliedRows = (data.credit_applied || []).filter((a) => Number(a?.amount) > 0);
+  const applied = Number(inv.amount_allocated) || appliedRows.reduce((t, a) => t + (Number(a.amount) || 0), 0);
+  const hasApplied = applied > 0;
+  const appliedShown = appliedRows.length ? appliedRows : hasApplied ? [{ number: null, amount: applied }] : [];
+  const state = { ...inv, amount_allocated: applied };
+  const balance = inv.balance_due != null ? Math.max(0, Number(inv.balance_due) || 0) : balanceDue(state);
+  const paidSoFar = amountPaid(state);
   const creditKind = hasCredit ? creditState(inv) : 'none';
-  const fullyCredited = !isPaid && creditKind === 'full' && paidSoFar === 0;
+  const fullyCredited = !isPaid && creditKind === 'full' && settledAmount(state) === 0;
   // Credit (with any part payment) has covered the lot: nothing to charge and
   // nothing to chase, though the status is still sent or viewed.
   const nothingToPay = !isPaid && balance <= 0;
   // With credit or a part payment the Pay button asks for less than the total,
   // so the totals show each step down to that figure.
-  const showSteps = hasCredit || (!isPaid && paidSoFar > 0);
-  // Paid in full and then credited: the balance stops at 0, so say where the
-  // rest went (the credit note says whether it has been refunded yet).
-  const overpaid = hasCredit ? paidSoFar - ((Number(inv.total) || 0) - credited) : 0;
+  const showSteps = hasCredit || hasApplied || (!isPaid && paidSoFar > 0);
+  // Paid (in cash or applied credit) past what a credit note left to ask for:
+  // the balance stops at 0, so say where the rest went (the credit note says
+  // whether it has been refunded or used).
+  // Both sides in pennies, by the rules in creditNotes.js.
+  const overpaid = hasCredit || hasApplied ? settledAmount(state) - creditableLeft(state) : 0;
   const cnLabel = (c) => {
     const n = c.number ?? c.credit_number;
     return typeof n === 'string' && /^CN-/i.test(n) ? n : creditNoteLabel(n);
@@ -159,8 +174,22 @@ export default function PublicInvoice({ token }) {
               {showSteps ? (
                 <>
                   <div className="flex justify-between font-semibold text-slate-800 pt-1.5 border-t border-slate-200"><span>Total</span><span className="tabular-nums">{money(inv.total)}</span></div>
-                  {hasCredit && <div className="flex justify-between text-slate-500"><span>Credited</span><span className="tabular-nums">-{money(credited)}</span></div>}
-                  {paidSoFar > 0 && <div className="flex justify-between text-slate-500"><span>Paid</span><span className="tabular-nums">-{money(paidSoFar)}</span></div>}
+                  {hasCredit && <div className="flex justify-between text-slate-500"><span>Credited</span><span className="tabular-nums">{minus(credited)}</span></div>}
+                  {appliedShown.map((a, i) => {
+                    const cn = a.number != null && a.number !== '' ? cnLabel(a) : '';
+                    return (
+                      <div key={`applied-${i}`} className="flex justify-between gap-3 text-slate-500">
+                        <span className="min-w-0">
+                          Credit applied{cn ? ' ' : ''}
+                          {cn && (a.public_token
+                            ? <a href={`/c/${encodeURIComponent(a.public_token)}`} className="font-medium underline underline-offset-2" style={{ color: accent }}>{cn}</a>
+                            : cn)}
+                        </span>
+                        <span className="tabular-nums shrink-0">{minus(a.amount)}</span>
+                      </div>
+                    );
+                  })}
+                  {paidSoFar > 0 && <div className="flex justify-between text-slate-500"><span>Paid</span><span className="tabular-nums">{minus(paidSoFar)}</span></div>}
                   <div className="flex justify-between text-base font-bold text-slate-900 pt-1.5 border-t border-slate-200"><span>Balance due</span><span className="tabular-nums">{money(isPaid ? 0 : balance)}</span></div>
                   {overpaid > 0.005 && <div className="text-xs text-slate-500 text-right">{money(overpaid)} more was paid than is now owed</div>}
                 </>
@@ -185,7 +214,7 @@ export default function PublicInvoice({ token }) {
                       {c.issue_date && <span className="block sm:inline text-xs text-slate-500"><span className="hidden sm:inline"> · </span>{fmtDate(c.issue_date)}</span>}
                     </span>
                     <span className="flex items-center gap-3 shrink-0">
-                      <span className="tabular-nums text-slate-800">-{money(c.total)}</span>
+                      <span className="tabular-nums text-slate-800">{minus(c.total)}</span>
                       {token && <span className="text-xs font-semibold" style={{ color: accent }}>View</span>}
                     </span>
                   </>
@@ -207,7 +236,7 @@ export default function PublicInvoice({ token }) {
           ) : nothingToPay ? (
             <div className="rounded-xl p-4 text-center" style={{ background: '#f1f5f9', color: '#334155' }}>
               <div className="font-semibold">Nothing left to pay</div>
-              {hasCredit && <div className="text-xs text-slate-500 mt-0.5">{fullyCredited ? 'This invoice has been credited in full.' : 'Payments and credit notes cover this invoice.'}</div>}
+              {(hasCredit || hasApplied) && <div className="text-xs text-slate-500 mt-0.5">{fullyCredited ? 'This invoice has been credited in full.' : 'Payments and credit cover this invoice.'}</div>}
             </div>
           ) : (
             <>
