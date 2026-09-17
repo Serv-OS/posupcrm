@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import IncomingCallOverlay from '../components/IncomingCallOverlay.jsx';
+import { createRinger, unlockAudio, audioReady, flashTitle } from '../lib/phoneRing';
 import '../index.css';
 import TodayPanel from '../components/crm/TodayPanel.jsx';
 import TaskDetail from '../components/crm/TaskDetail.jsx';
@@ -219,6 +221,23 @@ function InvoiceView({ id }) {
   );
 }
 
+// Harness only: the incoming call alert without Twilio. Ring starts the real
+// ringer and tab flash and shows the real overlay.
+function PhoneHarness() {
+  const [ringing, setRinging] = useState(false);
+  const [sound, setSound] = useState(false);
+  const ringer = React.useRef(null); if (!ringer.current) ringer.current = createRinger();
+  const stopFlash = React.useRef(null);
+  const ring = () => { unlockAudio(); const ok = ringer.current.start({ seconds: 8 }); stopFlash.current = flashTitle('\u{1F4DE} Incoming call: Dan Marsh'); setSound(ok || audioReady()); setRinging(true); window.__ringOk = ok; };
+  const stop = () => { ringer.current.stop(); stopFlash.current?.(); setRinging(false); };
+  return (
+    <div className="p-6">
+      <button id="ring" onClick={ring} className="px-4 py-2 rounded-xl bg-emerald-500 text-white font-bold">Ring</button>
+      {ringing && <IncomingCallOverlay callerName="Dan Marsh" callerNumber="+447700900123" soundOn={sound} onAnswer={stop} onDecline={stop} />}
+    </div>
+  );
+}
+
 function App() {
   const [v, setV] = useState(() => (location.hash || '#today').slice(1));
   useEffect(() => { const f = () => setV(location.hash.slice(1) || 'today'); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
@@ -233,6 +252,7 @@ function App() {
       <main className="work flex-1 min-w-0 overflow-hidden lg:flex lg:flex-col">
         {v !== 'inbox' && <OfflineBanner onView={() => { location.hash = 'inbox'; }} />}
         <div className="contents lg:block lg:flex-1 lg:min-h-0">
+        {v === 'phone' && <PhoneHarness />}
         {v === 'today' && <TodayPanel profile={P} onNavigate={nav} />}
         {v === 'task' && <TaskDetail taskId="t3" profile={P} onClose={nav} onNavigate={nav} />}
         {v === 'ticket' && <TicketDetail ticketId="k1" profile={P} onClose={nav} onNavigate={nav} />}

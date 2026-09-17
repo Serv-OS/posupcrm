@@ -211,12 +211,18 @@ serve(async (req) => {
       twiml += ` action="${FN}/twilio-voice-status?ticket=${ticketId || ""}"`;
       twiml += ` callerId="${to}">`;
 
-      for (const agent of onlineAgents.slice(0, 3)) {
-        // Ring up to 3 agents simultaneously
+      for (const agent of onlineAgents.slice(0, 5)) {
+        // Ring up to 5 agents simultaneously
         twiml += `<Client>`;
-        twiml += `<Identity>${agent.twilio_identity}</Identity>`;
-        twiml += `<Parameter name="callerName" value="${callerName}"/>`;
-        twiml += `<Parameter name="callerNumber" value="${from}"/>`;
+        twiml += `<Identity>${xmlEscape(agent.twilio_identity)}</Identity>`;
+        // Escaped: a contact called Fish & Chips used to make this invalid XML,
+        // and Twilio then played "technical difficulties" instead of ringing.
+        twiml += `<Parameter name="callerName" value="${xmlEscape(callerName)}"/>`;
+        twiml += `<Parameter name="callerNumber" value="${xmlEscape(from)}"/>`;
+        // Which call and which ticket this is, so the agent's screen can open
+        // the ticket and tell "a colleague answered" from "nobody got to it".
+        twiml += `<Parameter name="callSid" value="${xmlEscape(callSid || "")}"/>`;
+        twiml += `<Parameter name="ticketId" value="${xmlEscape(ticketId || "")}"/>`;
         twiml += `</Client>`;
       }
 
