@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { money } from './InvoicesPanel.jsx';
 import { Sheet, Problems, creditErrorText } from './CreditNoteModal.jsx';
+import { isPastDay } from '../../lib/day';
 import {
   ALLOCATABLE_STATUSES, ALLOCATION_NOTE_MAX, REASON_MAX, REASON_MIN, allocationDefault, allocationEffect, allocationProblems,
   balanceDue, creditAvailable, creditNoteLabel, creditUse, removeAllocationEffect,
@@ -311,7 +312,7 @@ export default function ApplyCreditModal({ note: startNote = null, invoice: star
             );
             if (fromNote) {
               const due = balanceDue(c);
-              const late = c.due_date && String(c.due_date).slice(0, 10) < new Date().toISOString().slice(0, 10);
+              const late = isPastDay(c.due_date);
               return (
                 <button key={c.id} type="button" role="radio" aria-checked={on} onClick={() => pick(c)} className={base}>
                   {dot}

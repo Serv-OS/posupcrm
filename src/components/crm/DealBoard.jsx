@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { handleClosedWon } from '../../lib/dealHelpers';
+import { fmtDay } from '../../lib/day';
 
 const STAGES = [
   { key: 'new_lead',       label: 'New Lead',       color: '#3b82f6' },
@@ -250,7 +251,7 @@ export default function DealBoard({ profile, onSelectDeal, onNavigate }) {
                           {d.expected_close_date && (
                             <div className="text-right shrink-0">
                               <div className="text-[9px] font-mono font-bold uppercase tracking-wider text-dim">Expected Close Date</div>
-                              <div className="text-sm text-paper font-mono">{new Date(d.expected_close_date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</div>
+                              <div className="text-sm text-paper font-mono">{fmtDay(d.expected_close_date, { day: '2-digit', month: '2-digit', year: 'numeric' })}</div>
                             </div>
                           )}
                         </div>

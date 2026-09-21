@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { ShoppingCart, Plus, X, Truck, Trash2 } from 'lucide-react';
 import { parseSerials, receiveShipment, fmtGBP, shippedByProduct } from '../../lib/inventoryOps';
+import { fmtDay } from '../../lib/day';
 
 const input = "w-full px-3 py-2 bg-card border border-bdr rounded-xl text-sm text-paper placeholder-dim focus:outline-none focus:border-ember";
 const label = "text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-dim mb-1 block";
@@ -76,7 +77,7 @@ export default function PurchasingView({ profile, initialTab = 'orders' }) {
                   <span className="font-mono font-bold text-paper">{o.po_number}</span>
                   <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${displayStatus === 'in transit' ? 'bg-blue-100 text-blue-700' : PO_BADGE[o.status]}`}>{displayStatus}</span>
                   <span className="text-sm text-muted">{o.supplier_name}</span>
-                  {o.expected_by && <span className="text-xs text-dim">· expected {new Date(o.expected_by).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>}
+                  {o.expected_by && <span className="text-xs text-dim">· expected {fmtDay(o.expected_by, { day: 'numeric', month: 'short' })}</span>}
                   <span className="text-xs text-dim">· {shipped}/{total} shipped · {received}/{total} received</span>
                   <span className="ml-auto text-sm font-semibold text-paper tabular-nums">{fmtGBP(o.total_with_tax)}</span>
                 </div>
@@ -151,7 +152,7 @@ function ShipmentCard({ s, canWrite, onReceive }) {
         <span className="text-sm font-semibold text-paper">{s.supplier_name || 'Shipment'}</span>
         <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${s.status === 'in_transit' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{s.status.replace('_', ' ')}</span>
         {s.po_number && <span className="text-xs text-dim">· {s.po_number}</span>}
-        {s.eta && s.status === 'in_transit' && <span className="text-xs text-dim">· ETA {new Date(s.eta).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>}
+        {s.eta && s.status === 'in_transit' && <span className="text-xs text-dim">· ETA {fmtDay(s.eta, { day: 'numeric', month: 'short' })}</span>}
         <span className="text-xs text-dim">· {recd}/{units} received → {s.warehouse?.name || '—'}</span>
         {canWrite && s.status === 'in_transit' && <button onClick={onReceive} className="ml-auto px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-700 border border-emerald-500/30 text-xs font-semibold hover:bg-emerald-500/25">Receive</button>}
       </div>

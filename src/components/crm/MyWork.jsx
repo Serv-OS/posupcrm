@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import SlaBadge from './SlaBadge.jsx';
 import { LEAD_STAGE_MAP } from '../../lib/leadStages';
+import { fmtDay } from '../../lib/day';
 
 const DEAL_OPEN = (s) => !['closed_won', 'closed_lost'].includes(s);
 const TICKET_OPEN = (s) => !['resolved', 'closed'].includes(s);
@@ -43,7 +44,7 @@ export default function MyWork({ profile, onNavigate }) {
     return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
   })();
 
-  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+  const fmtDate = (d) => fmtDay(d, { day: 'numeric', month: 'short' });
   const isOverdue = (d) => d && new Date(d) < new Date(new Date().toDateString());
   const money = (v) => v ? `£${Number(v).toLocaleString('en-GB')}` : '';
 

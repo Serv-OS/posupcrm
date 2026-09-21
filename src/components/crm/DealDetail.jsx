@@ -7,6 +7,7 @@ import { handleClosedWon } from '../../lib/dealHelpers';
 import TimerButton from './TimerButton.jsx';
 import AssociationManager from './AssociationManager.jsx';
 import ActivityTimeline from './ActivityTimeline.jsx';
+import { fmtDay, toDayISO } from '../../lib/day';
 
 const STAGES = [
   'new_lead','contacted','qualified','demo_booked','demo_done',
@@ -74,7 +75,7 @@ export default function DealDetail({ dealId, profile, onClose, onNavigate }) {
       .or(`and(from_type.eq.deal,from_id.eq.${dealId},to_type.eq.location),and(to_type.eq.deal,to_id.eq.${dealId},from_type.eq.location)`)
       .limit(1);
     const locationId = locAssoc && locAssoc.length ? (locAssoc[0].from_type === 'location' ? locAssoc[0].from_id : locAssoc[0].to_id) : null;
-    const validUntil = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    const validUntil = toDayISO(new Date(Date.now() + 30 * 86400000));
     const { data, error } = await supabase.from('quotes').insert({
       deal_id: dealId, company_id: deal.company_id || null, contact_id: contactId, location_id: locationId,
       tax_rate: 20, payment_terms: 'pay_now', valid_until: validUntil, created_by: profile.id,
@@ -259,7 +260,7 @@ export default function DealDetail({ dealId, profile, onClose, onNavigate }) {
                 <div className="space-y-3">
                   <Field label="Stage" value={STAGE_LABELS[deal.stage]} />
                   <Field label="Source" value={deal.source} />
-                  <Field label="Expected close" value={deal.expected_close_date ? new Date(deal.expected_close_date).toLocaleDateString('en-GB') : null} />
+                  <Field label="Expected close" value={fmtDay(deal.expected_close_date, { day: '2-digit', month: '2-digit', year: 'numeric' }) || null} />
                   <Field label="Owner" value={ownerName(deal.owner_id)} />
                   <Field label="Created" value={new Date(deal.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })} />
                   {deal.lost_reason && <Field label="Lost reason" value={deal.lost_reason} />}

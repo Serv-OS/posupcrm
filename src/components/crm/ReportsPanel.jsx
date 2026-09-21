@@ -3,9 +3,10 @@ import { supabase } from '../../lib/supabase';
 import { BarChart3, ArrowUpDown } from 'lucide-react';
 import { money, invStatus } from './InvoicesPanel.jsx';
 import { amountPaid, balanceDue, creditUse } from '../../lib/creditNotes';
+import { toDayISO } from '../../lib/day';
 
 // ── date helpers ────────────────────────────────────────────────────────────
-const iso = (d) => d.toISOString().slice(0, 10);
+const iso = (d) => toDayISO(d);
 const monthKey = (dstr) => (dstr || '').slice(0, 7);           // 'YYYY-MM'
 const monthLabel = (key) => { const [y, m] = key.split('-'); return new Date(+y, +m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }); };
 const startOfMonth = (d) => { const x = new Date(d); x.setDate(1); x.setHours(0, 0, 0, 0); return x; };

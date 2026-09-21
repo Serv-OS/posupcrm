@@ -4,13 +4,14 @@ import { FileSignature, Plus, X, FileDown } from 'lucide-react';
 import { money, curOf } from './InvoicesPanel.jsx';
 import { useStickyState } from '../../lib/stickyState';
 import { downloadListPdf } from '../../lib/listPdf';
+import { fmtDay, isPastDay, toDayISO } from '../../lib/day';
 
-const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '—';
+const fmtD = (d) => fmtDay(d, undefined, 'en-GB', '—');
 
 // Effective display status: stale sent/viewed quotes past their validity = expired
 export const quoteStatus = (q) => {
   if (['sent', 'viewed', 'draft'].includes(q.status) && q.valid_until &&
-      new Date(q.valid_until) < new Date(new Date().toDateString())) return 'expired';
+      isPastDay(q.valid_until)) return 'expired';
   return q.status;
 };
 
@@ -55,7 +56,7 @@ export default function QuotesPanel({ profile, onNavigate }) {
     const { data, error } = await supabase.from('quotes').insert({
       status: 'draft', created_by: profile.id,
       company_id: newCompany || null, contact_id: newContact || null,
-      valid_until: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      valid_until: toDayISO(new Date(Date.now() + 30 * 86400000)),
     }).select('id').single();
     if (error) { alert(error.message); return; }
     setCreating(false); setNewCompany(''); setNewContact('');
