@@ -10,8 +10,11 @@ import {
 import CreditNoteModal, { CancelCreditModal, RefundCreditModal, creditErrorText, downloadCreditNotePdf, loadCreditBasis, sendCreditNoteEmail } from './CreditNoteModal.jsx';
 import ApplyCreditModal, { RemoveCreditModal, loadCreditToUse, loadInvoiceAllocations, sameCustomer } from './ApplyCreditModal.jsx';
 import AmountReceivedModal, { loadPaymentHistory } from './AmountReceivedModal.jsx';
+import { savableLines, namelessWithValue, invoiceTotals } from '../../lib/invoiceLines';
 
 const FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+
+
 
 export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate }) {
   const [inv, setInv] = useState(null);
@@ -151,9 +154,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
   const setLine = (i, k, v) => setLines(p => p.map((l, j) => j === i ? { ...l, [k]: v } : l));
   const locs = locations.filter(l => !inv.company_id || l.company_id === inv.company_id);
 
-  const subtotal = lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_price) || 0), 0);
-  const taxAmount = lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_price) || 0) * (Number(l.tax_rate) || 0) / 100, 0);
-  const total = subtotal + taxAmount;
+  const { subtotal, taxAmount, total } = invoiceTotals(lines);
   // Mark paid records a payment through the same database function as Change,
   // which takes a sent or viewed invoice with something left to pay (a draft is
   // sent first). Until the lines are locked the total is the one on screen,
@@ -166,6 +167,14 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
   // received and the paid status are never written here: Mark paid and Change
   // go through set_invoice_amount_received (AmountReceivedModal).
   const save = async (extra = {}) => {
+    // Stop before anything is written: a priced line with no name would be
+    // dropped by the insert below and the money would just disappear.
+    const nameless = namelessWithValue(lines);
+    if (nameless.length) {
+      const which = nameless.map(({ index }) => `line ${index + 1}`).join(', ');
+      alert(`Give every priced line an item name before saving (${which}). Nothing has been saved.`);
+      return false;
+    }
     setSaving(true);
     // Checked again at the moment of saving, not just when the screen loaded:
     // someone else may have issued a credit note on this invoice since.
@@ -189,7 +198,7 @@ export default function InvoiceBuilder({ invoiceId, profile, onClose, onNavigate
     let { error } = await supabase.from('invoices').update(patch).eq('id', invoiceId);
     if (!error && !keepLines) {
       ({ error } = await supabase.from('invoice_line_items').delete().eq('invoice_id', invoiceId));
-      const clean = lines.filter(l => (l.name || '').trim());
+      const clean = savableLines(lines);
       if (!error && clean.length) {
         ({ error } = await supabase.from('invoice_line_items').insert(clean.map((l, i) => ({
           invoice_id: invoiceId, name: l.name.trim(), description: (l.description || '').trim() || null,
