@@ -9,6 +9,7 @@ import BookingPage from './components/BookingPage.jsx';
 import PublicQuote from './components/PublicQuote.jsx';
 import PublicInvoice from './components/PublicInvoice.jsx';
 import PublicCreditNote from './components/PublicCreditNote.jsx';
+import TicketUpload from './components/TicketUpload.jsx';
 import BankCallback from './components/BankCallback.jsx';
 
 export default function App() {
@@ -27,6 +28,8 @@ export default function App() {
   const invoiceMatch = window.location.pathname.match(/^\/i\/([^/?#]+)/);
   // Public credit note route: /c/<token>
   const creditMatch = window.location.pathname.match(/^\/c\/([^/?#]+)/);
+  // Customer photo upload for a ticket, no login: /u/<token>
+  const uploadMatch = window.location.pathname.match(/^\/u\/([^/?#]+)/);
   // Bank-feed OAuth return: /bank/callback?ref=<reference> (authenticated user)
   const bankCb = window.location.pathname.match(/^\/bank\/callback/);
 
@@ -57,6 +60,7 @@ export default function App() {
   }
   if (creditMatch) {
     return <PublicCreditNote token={decodeURIComponent(creditMatch[1])} />;
+  if (uploadMatch) return <TicketUpload token={decodeURIComponent(uploadMatch[1])} />;
   }
   if (bankCb) {
     return <BankCallback />;

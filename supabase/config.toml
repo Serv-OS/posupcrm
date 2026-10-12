@@ -22,6 +22,9 @@ verify_jwt = false
 verify_jwt = false
 [functions.quote-public]
 verify_jwt = false
+# The customer has no login: the HMAC token in the link is the authority.
+[functions.ticket-upload]
+verify_jwt = false
 [functions.stripe-webhook]
 verify_jwt = false
 [functions.twilio-inbound-sms]

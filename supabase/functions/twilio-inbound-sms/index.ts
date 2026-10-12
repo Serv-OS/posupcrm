@@ -7,6 +7,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { storeAttachment } from "../_shared/attachments.ts";
+import { uploadToken, uploadUrl, replyWithUpload } from "../_shared/uploadLink.ts";
 
 /* Picture messages (MMS).
  *
@@ -235,10 +236,18 @@ serve(async (req) => {
       const { data: vs } = await supabase.from("support_settings")
         .select("auto_reply_sms_enabled, auto_reply_sms_message").eq("id", 1).single();
       if (vs?.auto_reply_sms_enabled && vs?.auto_reply_sms_message) {
-        const reply = vs.auto_reply_sms_message
+        let reply = vs.auto_reply_sms_message
           .replace(/\{\{\s*contact_name\s*\}\}/g, contactName || "there")
           .replace(/\{\{\s*ticket_number\s*\}\}/g, ticketNumber ? `#${ticketNumber}` : "")
           .trim();
+        // A photo cannot be texted to a UK number, so the reply carries a link
+        // that puts one on this ticket instead. {{upload_link}} in the template
+        // places it; otherwise it is added on the end.
+        if (ticketId) {
+          const appUrl = Deno.env.get("APP_URL") || "https://posupcrm.vercel.app";
+          const token = await uploadToken(ticketId, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+          reply = replyWithUpload(reply, uploadUrl(appUrl, token));
+        }
         // Log the auto-reply as an outbound activity
         if (ticketId) {
           await supabase.from("crm_activities").insert({

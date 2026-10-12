@@ -29,6 +29,39 @@ function phoneVariants(phone) {
   return out;
 }
 
+
+/* "Ask for a photo": a link the customer can open with no login, which puts
+ * their pictures on this ticket. It exists because a photo cannot be texted to
+ * a UK number at all (Twilio carries MMS in the US and Canada only), so the
+ * link is the way in. Tickets raised by SMS get it in the auto reply; this is
+ * for the ones that arrive by phone or email. */
+function PhotoLinkButton({ ticketId }) {
+  const [state, setState] = useState('');
+  const get = async () => {
+    setState('working');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ticket-upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token || ''}` },
+        body: JSON.stringify({ action: 'staff_link', ticket_id: ticketId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Could not make a link.');
+      await navigator.clipboard.writeText(d.url);
+      setState('copied');
+    } catch (e) {
+      setState(e.message);
+    }
+    setTimeout(() => setState(''), 2500);
+  };
+  return (
+    <button onClick={get} className="text-[11px] font-semibold text-ember hover:text-ember-deep">
+      {state === 'copied' ? 'Link copied' : state === 'working' ? 'One moment…' : state || 'Copy photo upload link'}
+    </button>
+  );
+}
+
 export default function TicketDetail({ ticketId, profile, onClose, onNavigate }) {
   const [ticket, setTicket] = useState(null);
   const [company, setCompany] = useState(null);
@@ -529,7 +562,8 @@ export default function TicketDetail({ ticketId, profile, onClose, onNavigate })
                 ) : <Empty>No locations</Empty>}
               </Card>
 
-              <AttachmentsCard subjectType="ticket" subjectId={ticketId} profile={profile} />
+              <AttachmentsCard subjectType="ticket" subjectId={ticketId} profile={profile}
+                extraAction={<PhotoLinkButton ticketId={ticketId} />} />
 
               <Card title="Projects" count={projects.length}
                 action={canWrite ? { label: '+ Create', onClick: createLinkedProject } : null}>
