@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Landmark, Plus, RefreshCw, X, AlertTriangle, Search, Sparkles, Lock } from 'lucide-react';
 import { gbp2 } from '../../lib/money.js';
-import { suggestMatch, suggestInvoice, invoiceBalance, applyRule, normalizePayee } from '../../lib/bankRecon.js';
+import { suggestMatch, suggestInvoice, suggestPaidInvoice, invoiceBalance, applyRule, normalizePayee } from '../../lib/bankRecon.js';
 
 // The bank feed (Monzo Business, live). Peter, 25 Nov 2026:
 //  1. only people the owner allows see it (profiles.bank_feed_access)
@@ -42,6 +42,7 @@ export default function BankFeedPanel({ profile, onNavigate }) {
   const [bills, setBills] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [invoices, setInvoices] = useState([]);
+  const [paidInvoices, setPaidInvoices] = useState([]);   // already marked paid, to link bank lines to
   const [rules, setRules] = useState([]);
   const [categories, setCategories] = useState([]);
   const [people, setPeople] = useState([]);
@@ -59,7 +60,7 @@ export default function BankFeedPanel({ profile, onNavigate }) {
 
   const load = useCallback(async () => {
     if (!allowed) return;
-    const [c, a, t, d, b, e, inv, r, cat, ppl, co] = await Promise.all([
+    const [c, a, t, d, b, e, inv, r, cat, ppl, co, pinv] = await Promise.all([
       supabase.from('bank_connections').select('*').order('created_at', { ascending: false }),
       supabase.from('bank_accounts').select('*'),
       supabase.from('bank_transactions').select('*').eq('reconciled', false).order('booking_date', { ascending: false }).limit(500),
@@ -71,6 +72,7 @@ export default function BankFeedPanel({ profile, onNavigate }) {
       supabase.from('expense_categories').select('id, label').eq('active', true).order('sort'),
       supabase.from('profiles').select('id, display_name, role').in('role', ['owner', 'editor']).order('display_name'),
       supabase.from('companies').select('id, name').order('name'),
+      supabase.from('invoices').select('id, invoice_number, total, amount_paid, paid_at, due_date, issue_date, company:companies(name)').eq('status', 'paid').order('invoice_number', { ascending: false }).limit(1500),
     ]);
     setConnections(c.data || []); setAccounts(a.data || []);
     setTxns(t.data || []); setDone(d.data || []);
@@ -78,6 +80,7 @@ export default function BankFeedPanel({ profile, onNavigate }) {
     setExpenses((e.data || []).filter(x => x.paid_by !== 'company_card').map(x => ({ ...x, supplier_name: x.submitter?.display_name })));
     setInvoices((inv.data || []).map(x => ({ ...x, company_name: x.company?.name })).filter(x => invoiceBalance(x) > 0));
     setRules(r.data || []); setCategories(cat.data || []); setPeople(ppl.data || []); setCompanies(co.data || []);
+    setPaidInvoices((pinv.data || []).map(x => ({ ...x, company_name: x.company?.name })));
   }, [allowed]);
   useEffect(() => { load(); }, [load]);
 
@@ -138,7 +141,29 @@ export default function BankFeedPanel({ profile, onNavigate }) {
     flash(`Booked against INV-${data.result?.invoice_number ?? ''}.`);
     setMatchFor(null); load();
   };
+  // Money in for an invoice already marked paid: link it, never pay it twice.
+  const linkPaid = async (txn, id) => {
+    const { error } = await reconcile(txn.id, { matched_type: 'invoice', matched_id: id });
+    if (error) { fail(error.message); return; }
+    const i = paidInvoices.find(x => x.id === id);
+    flash(`Linked to INV-${i?.invoice_number ?? ''} (already paid, nothing recorded twice).`);
+    setMatchFor(null); load();
+  };
+  const linkAllPaid = async () => {
+    const pairs = [];
+    const taken = new Set(linkedIds);
+    for (const t of txns.filter(x => x.amount > 0)) {
+      if (suggestInvoice(t, invoices)) continue;
+      const sg = suggestPaidInvoice(t, paidInvoices, taken);
+      if (sg?.named) { pairs.push([t, sg.id]); taken.add(sg.id); }
+    }
+    if (!pairs.length) { flash('Nothing to link.'); return; }
+    setBusy('linkall');
+    for (const [t, id] of pairs) await reconcile(t.id, { matched_type: 'invoice', matched_id: id });
+    setBusy(''); flash(`Linked ${pairs.length} payment${pairs.length === 1 ? '' : 's'} to invoices already marked paid.`); load();
+  };
   const matchDoc = async (txn, type, id) => {
+    if (type === 'invoice_paid' || (type === 'invoice' && isPaidInv(id))) return linkPaid(txn, id);
     if (type === 'invoice') return matchInvoice(txn, id);
     const paid = { status: 'paid', amount_paid: Math.abs(txn.amount), paid_at: txn.booking_date, payment_method: 'bank', payment_reference: txn.dedup_key };
     const { error } = await supabase.from(type === 'bill' ? 'bills' : 'expenses').update(paid).eq('id', id);
@@ -201,9 +226,18 @@ export default function BankFeedPanel({ profile, onNavigate }) {
   };
 
   // ── Suggestions ───────────────────────────────────────────────────────────
-  const suggestFor = (t) => (Number(t.amount) > 0 ? suggestInvoice(t, invoices) : suggestMatch(t, bills, expenses));
+  // Invoices a bank line is already linked to (booked or linked), so a paid
+  // invoice is only ever claimed once.
+  const linkedIds = useMemo(() => new Set(done.filter(x => x.matched_type === 'invoice' && x.matched_id).map(x => x.matched_id)), [done]);
+  const suggestFor = (t) => (Number(t.amount) > 0
+    ? suggestInvoice(t, invoices) || suggestPaidInvoice(t, paidInvoices, linkedIds)
+    : suggestMatch(t, bills, expenses));
+  const isPaidInv = (id) => paidInvoices.some(x => x.id === id);
   const docLabel = (type, id) => {
-    if (type === 'invoice') { const i = invoices.find(x => x.id === id); return i ? `INV-${i.invoice_number}${i.company_name ? ` · ${i.company_name}` : ''}` : 'an invoice'; }
+    if (type === 'invoice' || type === 'invoice_paid') {
+      const i = invoices.find(x => x.id === id) || paidInvoices.find(x => x.id === id);
+      return i ? `INV-${i.invoice_number}${i.company_name ? ` · ${i.company_name}` : ''}${isPaidInv(id) ? ' (already paid)' : ''}` : 'an invoice';
+    }
     if (type === 'bill') { const b = bills.find(x => x.id === id); return b ? `${b.supplier_name || 'Bill'}${b.bill_number ? ` #${b.bill_number}` : ''}` : 'a bill'; }
     if (type === 'expense') { const e = expenses.find(x => x.id === id); return e ? `${e.supplier_name || 'Expense'} expense` : 'an expense'; }
     if (type === 'refund') { const o = [...txns, ...done].find(x => x.id === id); return o ? `${o.payee || 'line'} ${fmtMoney(o.amount)} on ${fmtD(o.booking_date)}` : 'another line'; }
@@ -213,7 +247,7 @@ export default function BankFeedPanel({ profile, onNavigate }) {
   const aiFor = (t) => {
     const m = t.ai_match;
     if (!m) return null;
-    if (m.kind === 'invoice' && m.target_id && !invoices.some(x => x.id === m.target_id)) return { ...m, stale: true };
+    if (m.kind === 'invoice' && m.target_id && !invoices.some(x => x.id === m.target_id) && !(isPaidInv(m.target_id) && !linkedIds.has(m.target_id))) return { ...m, stale: true };
     if (m.kind === 'bill' && m.target_id && !bills.some(x => x.id === m.target_id)) return { ...m, stale: true };
     if (m.kind === 'expense' && m.target_id && !expenses.some(x => x.id === m.target_id)) return { ...m, stale: true };
     return m;
@@ -251,6 +285,7 @@ export default function BankFeedPanel({ profile, onNavigate }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={linkAllPaid} disabled={busy === 'linkall'} title="Links money in to invoices already marked paid, where the reference names the invoice and the amount agrees" className="btn-ghost px-3 py-2 rounded-xl text-sm">{busy === 'linkall' ? 'Linking…' : 'Link paid invoices'}</button>
           <button onClick={() => askAi()} disabled={busy === 'ai'} className="btn-ghost px-3 py-2 rounded-xl text-sm flex items-center gap-1.5"><Sparkles size={14} /> {busy === 'ai' ? 'Thinking…' : 'Ask AI to match'}</button>
           <button onClick={connect} disabled={busy === 'institutions'} className="btn-glass px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-1.5"><Plus size={15} /> {busy === 'institutions' ? 'Loading…' : 'Connect bank'}</button>
         </div>
@@ -326,7 +361,7 @@ export default function BankFeedPanel({ profile, onNavigate }) {
         </div>
       </div>
 
-      {matchFor && <FindMatch t={matchFor} invoices={invoices} bills={bills} expenses={expenses} lines={[...txns, ...done]} ai={aiFor(matchFor)}
+      {matchFor && <FindMatch t={matchFor} invoices={invoices} paidInvoices={paidInvoices.filter(x => !linkedIds.has(x.id))} bills={bills} expenses={expenses} lines={[...txns, ...done]} ai={aiFor(matchFor)}
         onClose={() => setMatchFor(null)}
         onPick={(type, id) => (type === 'refund' ? pairRefund(matchFor, [...txns, ...done].find(x => x.id === id)) : matchDoc(matchFor, type, id))} />}
       {cardFor && <CardSpend t={cardFor} people={people} categories={categories} ai={aiFor(cardFor)} onClose={() => setCardFor(null)}
@@ -378,7 +413,7 @@ function Row({ t, sug, ai, docLabel, nameOf, catOf, onMatch, onFind, onBill, onI
       )}
 
       <div className="flex items-center gap-1.5 flex-wrap">
-        {sug && <Btn tone="go" onClick={() => onMatch(sug.type, sug.id)}>Match {docLabel(sug.type, sug.id)}{sug.part ? ' (part)' : ''}</Btn>}
+        {sug && <Btn tone="go" onClick={() => onMatch(sug.type, sug.id)}>{sug.type === 'invoice_paid' ? 'Link' : 'Match'} {docLabel(sug.type, sug.id)}{sug.part ? ' (part)' : ''}</Btn>}
         {aiTarget && !sameAsSug && <Btn tone="ai" onClick={() => onMatch(ai.kind, ai.target_id)}>{ai.kind === 'refund' ? 'Pair refund' : 'Match'}: {docLabel(ai.kind, ai.target_id)}</Btn>}
         <Btn onClick={onFind}>Find match…</Btn>
         {inMoney ? <Btn onClick={onInvoice}>Create invoice</Btn> : <Btn onClick={onBill}>Create bill</Btn>}
@@ -410,7 +445,7 @@ function Modal({ title, onClose, children, wide }) {
 }
 
 // 4: search across everything this line could be, closest amount first.
-function FindMatch({ t, invoices, bills, expenses, lines, ai, onClose, onPick }) {
+function FindMatch({ t, invoices, paidInvoices = [], bills, expenses, lines, ai, onClose, onPick }) {
   const inMoney = Number(t.amount) > 0;
   const tabs = inMoney ? [['invoice', 'Invoices'], ['refund', 'Refund of a payment']] : [['bill', 'Bills'], ['expense', 'Expenses'], ['refund', 'Refund of a payment']];
   const [tab, setTab] = useState(ai?.kind && tabs.some(([k]) => k === ai.kind) ? ai.kind : tabs[0][0]);
@@ -418,7 +453,11 @@ function FindMatch({ t, invoices, bills, expenses, lines, ai, onClose, onPick })
   const amt = Math.abs(Number(t.amount));
   const rows = useMemo(() => {
     let list = [];
-    if (tab === 'invoice') list = invoices.map(i => ({ id: i.id, title: `INV-${i.invoice_number} · ${i.company_name || 'No customer'}`, sub: `owed ${gbp2(invoiceBalance(i))}${i.due_date ? ` · due ${fmtD(i.due_date)}` : ''}`, amount: invoiceBalance(i), text: `inv-${i.invoice_number} ${i.invoice_number} ${i.company_name || ''}` }));
+    if (tab === 'invoice') list = [
+      ...invoices.map(i => ({ id: i.id, title: `INV-${i.invoice_number} · ${i.company_name || 'No customer'}`, sub: `owed ${gbp2(invoiceBalance(i))}${i.due_date ? ` · due ${fmtD(i.due_date)}` : ''}`, amount: invoiceBalance(i), text: `inv-${i.invoice_number} ${i.invoice_number} ${i.company_name || ''}` })),
+      // Already marked paid: picking one only links the bank line to it.
+      ...paidInvoices.map(i => ({ id: i.id, paid: true, title: `INV-${i.invoice_number} · ${i.company_name || 'No customer'}`, sub: `already paid ${gbp2(i.amount_paid || i.total)}${i.paid_at ? ` on ${fmtD(i.paid_at)}` : ''}, links only`, amount: Number(i.amount_paid || i.total || 0), text: `inv-${i.invoice_number} ${i.invoice_number} ${i.company_name || ''}` })),
+    ];
     if (tab === 'bill') list = bills.map(b => ({ id: b.id, title: `${b.supplier_name || 'Bill'}${b.bill_number ? ` #${b.bill_number}` : ''}`, sub: `owed ${gbp2(Number(b.total) - Number(b.amount_paid || 0))}${b.description ? ` · ${b.description}` : ''}`, amount: Number(b.total) - Number(b.amount_paid || 0), text: `${b.supplier_name || ''} ${b.description || ''} ${b.bill_number || ''}` }));
     if (tab === 'expense') list = expenses.map(e => ({ id: e.id, title: `${e.supplier_name || 'Someone'}: ${e.description || 'expense'}`, sub: `${gbp2(e.total)} · ${fmtD(e.expense_date)}`, amount: Number(e.total), text: `${e.supplier_name || ''} ${e.description || ''}` }));
     if (tab === 'refund') list = lines.filter(o => o.id !== t.id && Math.sign(o.amount) !== Math.sign(t.amount) && o.matched_type !== 'refund')
@@ -440,6 +479,7 @@ function FindMatch({ t, invoices, bills, expenses, lines, ai, onClose, onPick })
         {rows.length === 0 ? <div className="p-4 text-center text-dim text-sm">Nothing found.</div> : rows.slice(0, 80).map(r => (
           <button key={r.id} onClick={() => onPick(tab, r.id)} className="w-full px-3 py-2 rounded-xl hover:bg-card text-left flex items-center gap-2">
             <div className="flex-1 min-w-0"><div className="text-sm text-paper truncate">{r.title}</div><div className="text-[11px] text-dim truncate">{r.sub}</div></div>
+            {r.paid && <span className="text-[10px] font-bold text-dim shrink-0">paid</span>}
             {r.id === ai?.target_id && <span className="text-[10px] font-bold text-uv shrink-0">AI pick</span>}
             {Math.abs(r.amount - amt) < 0.005 && <span className="text-[10px] font-bold text-emerald-600 shrink-0">exact</span>}
           </button>

@@ -43,7 +43,7 @@ const TOOL = {
 
 const SYSTEM = `You reconcile a UK company's business bank account (POSUP, a restaurant till and payments company) against its CRM.
 For every bank line, choose the single most likely explanation:
-- invoice: money IN that pays one of the open invoices. Look for the invoice number in the reference (INV-1021, 1021), the amount equalling what is still owed, and the payer name resembling the customer (a director's personal name or a trading name often differs from the company name).
+- invoice: money IN that pays one of the open invoices, OR is the payment for an invoice ALREADY MARKED PAID (the second list: staff often mark invoices paid by hand before the bank line is matched; then the bank line just links to it). A reference that is an invoice number, with the same amount, is a very strong sign. Prefer this over new_invoice whenever such an invoice exists. Look for the invoice number in the reference (INV-1021, 1021), the amount equalling what is still owed, and the payer name resembling the customer (a director's personal name or a trading name often differs from the company name).
 - bill: money OUT that pays one of the open supplier bills.
 - expense: money OUT that reimburses one of the approved staff expenses (payee is usually the staff member).
 - refund: this line reverses another bank line (same or very similar amount, opposite sign, same merchant or person, usually within weeks). target_id is the other bank line's id.
@@ -65,14 +65,18 @@ export async function aiMatch(admin: any, opts: { txnIds?: string[]; limit?: num
   const { data: txns } = await q;
   if (!txns?.length) return { checked: 0 };
 
-  const [inv, bills, exps, people, cats, others] = await Promise.all([
+  const [inv, bills, exps, people, cats, others, paidInv, linked] = await Promise.all([
     admin.from("invoices").select("*, company:companies(name)").in("status", ["sent", "viewed"]).order("invoice_number", { ascending: false }).limit(200),
     admin.from("bills").select("id, bill_number, total, amount_paid, due_date, issue_date, description, supplier:inv_suppliers(name)").in("status", ["to_pay", "partially_paid"]).limit(150),
     admin.from("expenses").select("id, expense_number, total, expense_date, description, paid_by, submitter:profiles!expenses_submitter_id_fkey(display_name)").eq("status", "approved").neq("paid_by", "company_card").limit(100),
     admin.from("profiles").select("id, display_name").in("role", ["owner", "editor"]),
     admin.from("expense_categories").select("id, label").eq("active", true),
     admin.from("bank_transactions").select("id, booking_date, amount, payee, description, matched_type, assigned_to").order("booking_date", { ascending: false }).limit(300),
+    admin.from("invoices").select("id, invoice_number, total, amount_paid, paid_at, company:companies(name)").eq("status", "paid").order("paid_at", { ascending: false }).limit(400),
+    admin.from("bank_transactions").select("matched_id").eq("matched_type", "invoice").not("matched_id", "is", null),
   ]);
+  const linkedIds = new Set((linked.data || []).map((x: Obj) => x.matched_id));
+  const paidOpen = (paidInv.data || []).filter((i: Obj) => !linkedIds.has(i.id));
 
   const lines = (rows: Obj[] | null, f: (r: Obj) => string) => (rows || []).map(f).join("\n") || "(none)";
   const prompt = [
@@ -80,6 +84,8 @@ export async function aiMatch(admin: any, opts: { txnIds?: string[]; limit?: num
     lines(txns, (t) => `${t.id} | ${t.booking_date} | ${r2(t.amount)} ${t.currency || "GBP"} | ${t.payee || ""} | ${t.description || ""}${t.status === "pending" ? " | pending" : ""}`),
     "\nOPEN INVOICES (id | number | customer | still owed | due):",
     lines((inv.data || []).filter((i: Obj) => balance(i) > 0), (i) => `${i.id} | INV-${i.invoice_number} | ${i.company?.name || "?"} | ${balance(i)} | ${i.due_date || ""}`),
+    "\nINVOICES ALREADY MARKED PAID, NOT YET LINKED TO A BANK LINE (id | number | customer | amount paid | marked paid on):",
+    lines(paidOpen, (i) => `${i.id} | INV-${i.invoice_number} | ${i.company?.name || "?"} | ${r2(i.amount_paid || i.total)} | ${String(i.paid_at || "").slice(0, 10)}`),
     "\nOPEN BILLS (id | number | supplier | still owed | due | description):",
     lines(bills.data, (b) => `${b.id} | ${b.bill_number ?? ""} | ${b.supplier?.name || "?"} | ${r2(Number(b.total) - Number(b.amount_paid || 0))} | ${b.due_date || b.issue_date || ""} | ${b.description || ""}`),
     "\nAPPROVED STAFF EXPENSES TO REIMBURSE (id | number | person | amount | date | description):",
@@ -112,7 +118,7 @@ export async function aiMatch(admin: any, opts: { txnIds?: string[]; limit?: num
 
   // Keep only ids that really exist, so a made up id can never be booked.
   const known = new Set<string>([
-    ...(inv.data || []).map((x: Obj) => x.id), ...(bills.data || []).map((x: Obj) => x.id),
+    ...(inv.data || []).map((x: Obj) => x.id), ...paidOpen.map((x: Obj) => x.id), ...(bills.data || []).map((x: Obj) => x.id),
     ...(exps.data || []).map((x: Obj) => x.id), ...(others.data || []).map((x: Obj) => x.id),
   ]);
   const peopleIds = new Set((people.data || []).map((p: Obj) => p.id));
