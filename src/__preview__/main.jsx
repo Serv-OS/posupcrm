@@ -12,6 +12,7 @@ import TaskList from '../components/crm/TaskList.jsx';
 import Timeline from '../components/crm/Timeline.jsx';
 import WorkCalendar from '../components/crm/WorkCalendar.jsx';
 import WorkBoard from '../components/crm/WorkBoard.jsx';
+import BankFeedPanel from '../components/finance/BankFeedPanel.jsx';
 import BillsPanel from '../components/finance/BillsPanel.jsx';
 import QuoteBuilder from '../components/crm/QuoteBuilder.jsx';
 import MobileInbox from '../components/crm/MobileInbox.jsx';
@@ -263,6 +264,7 @@ function App() {
         {v === 'calendar' && <WorkCalendar profile={P} onNavigate={nav} />}
         {v === 'board' && <WorkBoard profile={P} onNavigate={nav} initialTab="board" />}
         {v === 'bills' && <BillsPanel profile={P} onNavigate={nav} />}
+        {v === 'bankfeed' && <BankFeedPanel profile={P} onNavigate={nav} />}
         {v === 'quote' && <QuoteBuilder quoteId="q1" profile={P} onClose={nav} onNavigate={nav} />}
         {v === 'reporting' && <ReportingDashboard profile={P} onNavigate={nav} />}
         {v === 'invoices' && <InvoicesPanel profile={P} onNavigate={nav} />}

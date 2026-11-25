@@ -212,6 +212,18 @@ const PAYMENT_ADJUSTMENTS = [];
 const SUPPORT_SETTINGS = [{ id: 1, business_name: 'POSUP', business_address: '1 Harness Street, Manchester M1 1AA', business_email: 'accounts@posup.co.uk', business_phone: '0161 000 0000', logo_url: null, quote_accent: '#15C26A', invoice_terms: 'Payment within 14 days of the invoice date.' }];
 
 export const TABLES = { gmail_connections_safe: [{ email: 'support@posup.co.uk' }], user_integrations: [{ profile_id: ME, provider: 'google', email: 'peter@posup.co.uk' }], ticket_email_threads: [], deal_stage_weights: WEIGHTS, deal_trading: [], location_modules: [], modules: [], feature_requests: [], profiles: MEMBERS, companies: COMPANIES, locations: LOCATIONS, deals: DEALS, crm_projects: PROJECTS, tasks: TASKS, work_items: WORK, tickets: TICKETS, onboardings: ONBOARDINGS, contacts: CONTACTS, associations: ASSOC, notifications: NOTIFS, bills: BILLS, quotes: QUOTES, quote_line_items: QLINES, products: PRODUCTS, inv_serials: SERIALS, crm_activities: ACTIVITIES, time_entries: TIME, expenses: [], bill_schedules: [], recurring_bills: [], suppliers: [{ id: 's1', name: 'Lightspeed POS UK Ltd' }, { id: 's2', name: 'Adyen N.V.' }, { id: 's3', name: 'Sumup Payments Ltd' }], expense_categories: [{ id: 'ec1', label: 'Software', active: true, sort: 1 }], attachments: [], processing_accounts: PROC_ACCOUNTS, processing_rates: PROC_RATES, leads: LEADS, stage_history: STAGE_HISTORY,
+  bank_connections: [{ id: 'bc1', reference: 'r1', institution_id: 'monzo', institution_name: 'Monzo Business', status: 'LN', last_synced_at: new Date().toISOString(), created_at: new Date().toISOString() }],
+  bank_accounts: [{ id: 'ba1', connection_id: 'bc1', gc_account_id: 'acc_1', provider_account_id: 'acc_1', name: 'Monzo Business · POSUP', currency: 'GBP', balance: 12840.22, iban: '04-00-06 12345678', active: true }],
+  bank_transactions: [
+    { id: 'bt1', account_id: 'ba1', gc_account_id: 'acc_1', dedup_key: 'mz:tx_1', status: 'booked', booking_date: '2026-11-24', amount: 120, currency: 'GBP', payee: 'A Customer Ltd', description: 'thanks', reconciled: false,
+      ai_match: { kind: 'new_invoice', target_id: null, confidence: 0.6, reason: 'Money in from a customer with no open invoice for this amount.' } },
+    { id: 'bt2', account_id: 'ba1', gc_account_id: 'acc_1', dedup_key: 'mz:tx_2', status: 'booked', booking_date: '2026-11-23', amount: -62.4, currency: 'GBP', payee: 'Shell', description: 'SHELL WATFORD', reconciled: false,
+      ai_match: { kind: 'company_card', target_id: null, confidence: 0.85, reason: 'Fuel at a forecourt; earlier Shell lines were Duncan.', person_id: null, category_id: 'ec1' } },
+    { id: 'bt3', account_id: 'ba1', gc_account_id: 'acc_1', dedup_key: 'mz:tx_3', status: 'booked', booking_date: '2026-11-22', amount: 45.99, currency: 'GBP', payee: 'Amazon', description: 'Refund', reconciled: false,
+      ai_match: { kind: 'refund', target_id: 'bt4', confidence: 0.9, reason: 'Same amount back from Amazon a week after the purchase.' } },
+    { id: 'bt4', account_id: 'ba1', gc_account_id: 'acc_1', dedup_key: 'mz:tx_4', status: 'booked', booking_date: '2026-11-15', amount: -45.99, currency: 'GBP', payee: 'Amazon', description: 'AMAZON MKTPLACE', reconciled: false },
+  ],
+  bank_match_rules: [],
   invoices: INVOICES, invoice_line_items: INVOICE_LINES, credit_notes: CREDIT_NOTES, credit_note_lines: CREDIT_NOTE_LINES, support_settings: SUPPORT_SETTINGS,
   credit_allocations: CREDIT_ALLOCATIONS, invoice_payment_adjustments: PAYMENT_ADJUSTMENTS };
 export const MEMBERS_LIST = MEMBERS;

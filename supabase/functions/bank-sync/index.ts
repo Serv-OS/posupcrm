@@ -13,8 +13,12 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { readSheet, headerIndex, mapSheetRow, corsJson } from "../_shared/gsheets.ts";
 import { accessToken, syncMonzoAccount, syncMonzoBalance } from "../_shared/monzoSync.ts";
+import { applyAutoRules } from "../_shared/bankBook.ts";
+import { aiMatch } from "../_shared/bankMatchAi.ts";
 
 serve(async (req) => {
+  // The Refresh button calls this from the browser, which asks first.
+  if (req.method === "OPTIONS") return corsJson({});
   if (req.method !== "POST") return corsJson({ error: "method" }, 405);
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const url = new URL(req.url);
@@ -73,7 +77,12 @@ serve(async (req) => {
       await admin.from("bank_connections").update({ last_synced_at: new Date().toISOString() }).eq("id", a.connection_id);
       results.push({ account: a.gc_account_id, imported: rows.length });
     }
-    return corsJson({ synced: results.length, results });
+    // After new lines arrive: rules that book by themselves, then the AI
+    // looks at anything still unmatched that it has not seen.
+    let auto = 0, ai: any = null;
+    try { auto = await applyAutoRules(admin); } catch (e) { auto = -1; console.error("auto rules", (e as Error).message); }
+    try { ai = await aiMatch(admin, { limit: 40 }); } catch (e) { ai = { error: (e as Error).message }; }
+    return corsJson({ synced: results.length, results, auto_booked: auto, ai });
   } catch (e) {
     return corsJson({ error: (e as Error).message }, 500);
   }
