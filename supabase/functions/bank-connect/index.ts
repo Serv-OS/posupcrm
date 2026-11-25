@@ -99,8 +99,20 @@ serve(async (req) => {
       }
       if (!accounts.length) return corsJson({ error: "Monzo shows no open accounts on this login." }, 422);
       // The business account feeds the CRM. A personal account on the same
-      // login is saved but switched off.
+      // login is saved but switched off. One Monzo login can hold several
+      // companies (POSUP and SERVOS APP LIMITED): MONZO_ACCOUNTS names the
+      // ones this CRM keeps (a word from the account name, comma separated).
+      // An account already saved keeps the on/off it was given.
       const hasBusiness = accounts.some((a: any) => a.type === "uk_business");
+      const wanted = (Deno.env.get("MONZO_ACCOUNTS") || "").split(",").map((w) => w.trim().toUpperCase()).filter(Boolean);
+      const { data: before } = await admin.from("bank_accounts").select("gc_account_id, active").in("gc_account_id", accounts.map((a: any) => a.id));
+      const keep = new Map((before || []).map((b: any) => [b.gc_account_id, b.active]));
+      const defaultOn = (a: any) => {
+        if (hasBusiness && a.type !== "uk_business") return false;
+        if (!wanted.length) return true;
+        const label = String(a.description || "").toUpperCase();
+        return wanted.some((w) => label.includes(w));
+      };
       const saved = [];
       for (const a of accounts) {
         const name = a.type === "uk_business" ? `Monzo Business${a.description ? ` · ${a.description}` : ""}` : "Monzo personal";
@@ -108,7 +120,7 @@ serve(async (req) => {
           connection_id: conn.id, gc_account_id: a.id, provider_account_id: a.id, account_uid: a.id,
           name, owner_name: (a.owners || [])[0]?.preferred_name || null, currency: a.currency || "GBP",
           iban: a.account_number && a.sort_code ? `${a.sort_code.replace(/(\d\d)(\d\d)(\d\d)/, "$1-$2-$3")} ${a.account_number}` : null,
-          active: hasBusiness ? a.type === "uk_business" : true, updated_at: new Date().toISOString(),
+          active: keep.has(a.id) ? keep.get(a.id) : defaultOn(a), updated_at: new Date().toISOString(),
         }, { onConflict: "gc_account_id" }).select("*").single();
         if (error) throw new Error(error.message);
         saved.push(row);
