@@ -51,6 +51,7 @@ const NOTIFS = [
   { id: 'n4', type: 'system', title: 'Weekly digest is ready', body: null, entity_type: null, link_id: null, read_at: ts(-2), created_at: ts(-2), recipient_id: ME },
 ];
 const BILLS = [
+  { id: 'b3', supplier_id: null, description: 'JARLTECH EUROPE*54024585', total: 760.28, amount_paid: 760.28, status: 'paid', issue_date: d(-2), cost_context: 'ongoing', amounts_inclusive: true, created_at: ts(-1) },
   { id: 'b1', bill_number: 4821, supplier_id: 's1', supplier: { name: 'Lightspeed POS UK Ltd' }, total: 2480, amount_paid: 0, status: 'to_pay', due_date: d(-4), supplier_ref: 'INV-4821', cost_context: 'ongoing', created_at: ts(-20) },
   { id: 'b2', bill_number: 4822, supplier_id: 's2', supplier: { name: 'Adyen N.V.' }, total: 612.4, amount_paid: 0, status: 'to_pay', due_date: d(9), cost_context: 'ongoing', recurring_id: 'r1', created_at: ts(-10) },
   { id: 'b3', bill_number: 4823, supplier_id: 's3', supplier: { name: 'Sumup Payments Ltd' }, total: 149, amount_paid: 0, status: 'draft', due_date: null, cost_context: 'deal', created_at: ts(-1) },
@@ -224,6 +225,7 @@ export const TABLES = { gmail_connections_safe: [{ email: 'support@posup.co.uk' 
     { id: 'bt4', account_id: 'ba1', gc_account_id: 'acc_1', dedup_key: 'mz:tx_4', status: 'booked', booking_date: '2026-11-15', amount: -45.99, currency: 'GBP', payee: 'Amazon', description: 'AMAZON MKTPLACE', reconciled: false },
   ],
   bank_match_rules: [],
+  inv_suppliers: [{ id: 's1', name: 'Lightspeed POS UK Ltd' }, { id: 's2', name: 'Adyen N.V.' }], bill_line_items: [{ id: 'bl1', bill_id: 'b3', name: 'Shell', qty: 1, unit_price: 62.4, tax_rate: 0, line_total: 62.4, sort: 0 }],
   invoices: INVOICES, invoice_line_items: INVOICE_LINES, credit_notes: CREDIT_NOTES, credit_note_lines: CREDIT_NOTE_LINES, support_settings: SUPPORT_SETTINGS,
   credit_allocations: CREDIT_ALLOCATIONS, invoice_payment_adjustments: PAYMENT_ADJUSTMENTS };
 export const MEMBERS_LIST = MEMBERS;
